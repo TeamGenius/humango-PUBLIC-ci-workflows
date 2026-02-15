@@ -1,0 +1,32 @@
+name: Check Branch Guardrail (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      gcloud_project:
+        description: 'GCP Project to deploy to'
+        required: true
+        type: string
+      require_master_for_project:
+        description: 'Project that requires master branch for deployments'
+        required: false
+        type: string
+        default: 'humango-beta'
+
+permissions:
+  contents: read
+
+jobs:
+  check-branch:
+    name: Guardrail - Restrict branch for selected projects
+    runs-on: [self-hosted, small, gke, linux, preemptible, humango]
+    steps:
+      - name: Verify branch policy
+        run: |
+          echo "Branch: ${{ github.ref_name }}"
+          echo "GCP Project: ${{ inputs.gcloud_project }}"
+          if [ "${{ inputs.gcloud_project }}" == "${{ inputs.require_master_for_project }}" ] && \
+             [ "${{ github.ref_name }}" != "master" ]; then
+            echo "ERROR: Deployments to ${{ inputs.require_master_for_project }} MUST be from master branch"
+            exit 1
+          fi

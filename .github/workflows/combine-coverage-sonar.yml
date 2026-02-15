@@ -1,0 +1,176 @@
+name: Combine Coverage and Run SonarQube (Reusable)
+# Reusable workflow for combining coverage reports from multiple test jobs and running SonarQube analysis.
+# This workflow is called by both pull-request.yml and deployment workflows to ensure consistent
+# coverage and quality gate checks across different pipeline contexts.
+#
+# MAINTENANCE NOTE:
+# - When adding a new service test job to pull-request.yml, add it to the 'needs' list of the
+#   combine-coverage-and-sonar job that calls this workflow.
+# - See README_unit_tests.md (GitHub section) for complete guidance on adding new service tests.
+# - Coverage path mappings must be updated in common/tests/.coveragerc for new services.
+# - This workflow is the single source of truth for coverage combination and Sonar scanning logic.
+
+on:
+  workflow_call:
+    inputs:
+      sonar_reference_branch:
+        description: 'SonarQube new code reference branch'
+        type: string
+        default: 'development'
+      sonar_project_version:
+        description: 'SonarQube project version'
+        type: string
+        default: '3.1.0'
+    secrets:
+      SONAR_TOKEN:
+        description: 'SonarQube authentication token'
+        required: true
+      SONAR_HOST_URL:
+        description: 'SonarQube server URL'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  combine-coverage-and-sonar:
+    name: Combine coverage reports, Run Sonar and check quality gate
+    runs-on: [self-hosted, large, gke, linux, preemptible, humango]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for SonarQube
+          
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: coverage-reports
+          merge-multiple: false
+          
+      - name: Download setup artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: setup-artifacts
+          
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          
+      - name: Combine coverage
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 8
+          max_attempts: 2
+          retry_on_exit_code: "130,137,143"
+          command: |
+            echo "STEP - Combine and compute total coverage"
+            set -e
+            source set_env.sh
+            export COVERAGE_RCFILE=common/tests/.coveragerc
+            python -m pip install --upgrade pip
+            python -m pip install coverage
+            
+            # Look for .coverage database files (ignore any .xml files)
+            echo "Looking for .coverage database files..."
+            # Note: do NOT rely on merge-multiple, because many jobs produce a plain '.coverage'
+            # file which would otherwise get overwritten. Also include both '.coverage' and '.coverage.*'.
+            coverage_db_files=$(find coverage-reports/ \
+              -type f \
+              \( -name ".coverage" -o -name ".coverage.*" \) \
+              ! -name "*.xml" \
+              2>/dev/null | sort)
+            echo "$coverage_db_files" || true
+            
+            coverage_file_count=$(printf "%s\n" "$coverage_db_files" | sed '/^$/d' | wc -l)
+            echo "Found $coverage_file_count .coverage database files"
+            
+            if [ "$coverage_file_count" -eq 0 ]; then
+              echo "ERROR: No .coverage files found to combine"
+              echo "This means test jobs are not generating coverage database files"
+              exit 1
+            fi
+            
+            # Combine all .coverage files
+            echo "Combining coverage data..."
+            coverage combine $coverage_db_files
+            
+            # Generate reports
+            echo "Generating coverage reports..."
+            coverage report
+            coverage html -d coverage-reports/coverage-reports-html
+            coverage xml -o coverage-reports/coverage.xml --fail-under=${fail_under}
+            
+            echo "Coverage combination complete!"
+
+      - name: Sanity check coverage.xml paths
+        run: |
+          set -e
+          echo "STEP - Validate coverage.xml uses repo-relative paths"
+          if grep -q 'filename="/' coverage-reports/coverage.xml; then
+            echo "ERROR: coverage.xml contains absolute file paths (filename=\"/...\"); SonarQube will not match sources reliably"
+            echo "Hint: check common/tests/.coveragerc [run] source and [paths] mappings"
+            exit 1
+          fi
+          if grep -q "/workspace/" coverage-reports/coverage.xml; then
+            echo "ERROR: coverage.xml still contains /workspace paths; SonarQube will not match sources and coverage will show as 0%"
+            echo "Hint: check common/tests/.coveragerc [paths] mappings"
+            exit 1
+          fi
+          if grep -q "/usr/src/" coverage-reports/coverage.xml; then
+            echo "ERROR: coverage.xml contains /usr/src paths; SonarQube will not match sources and coverage will be under-reported"
+            echo "Hint: ensure common/tests/.coveragerc [paths] includes /usr/src/<component> mappings"
+            exit 1
+          fi
+          echo "OK: coverage.xml paths look repo-relative"
+          
+      - name: Setup SonarQube scan directory
+        run: |
+          echo "STEP - Run Sonar scan"
+          mkdir -p .github/workflows/sonar-reports
+          # Copy coverage.xml to non-gitignored location so SonarQube can read it
+          cp coverage-reports/coverage.xml .github/workflows/sonar-reports/coverage.xml
+          
+      - name: Install SonarQube scanner dependencies
+      # see https://github.com/sonarsource/sonarqube-scan-action/tree/master/?tab=readme-ov-file#advanced-settings
+        run: |
+          echo "STEP - Install required dependencies for SonarQube scanner"
+          sudo apt-get update
+          sudo apt-get install -y curl unzip
+          
+      - name: Determine SonarQube settings
+        id: sonar-vars
+        uses: ./.github/actions/determine-sonar-vars
+        with:
+          default-reference-branch: ${{ inputs.sonar_reference_branch }}
+          pr-base-ref: ''
+          current-branch: ${{ github.ref_name }}
+          project-prefix: 'humango-backend'
+          
+      - name: SonarQube Scan
+        uses: ./.github/actions/run-sonarqube-scan
+        with:
+          sonar-project-key: ${{ steps.sonar-vars.outputs.project-key }}
+          sonar-project-version: ${{ inputs.sonar_project_version }}
+          sonar-reference-branch: ${{ steps.sonar-vars.outputs.reference-branch }}
+          sonar-token: ${{ secrets.SONAR_TOKEN }}
+          sonar-host-url: ${{ secrets.SONAR_HOST_URL || vars.SONAR_HOST_URL }}
+          project-settings-file: 'sonar-project.properties'
+            
+      - name: Check Quality Gate
+        uses: ./.github/actions/check-quality-gate
+        with:
+          sonar-token: ${{ secrets.SONAR_TOKEN }}
+          
+      - uses: ./.github/actions/upload-coverage
+        with:
+          component: combined
+          coverage-path: |
+            coverage-reports/coverage.xml
+            coverage-reports/coverage-reports-html/**
+          retention-days: 7
+          
+      - uses: ./.github/actions/cancel-on-failure

@@ -1,0 +1,26 @@
+name: 'Upload Coverage Reports'
+description: 'Upload coverage reports as artifacts'
+inputs:
+  component:
+    description: 'Component name for coverage artifact'
+    required: true
+  coverage-path:
+    description: 'Path to coverage files'
+    required: false
+    default: |
+      coverage-reports/**
+      coverage-reports/.coverage*
+  retention-days:
+    description: 'Number of days to retain the artifact'
+    required: false
+    default: '1'
+runs:
+  using: 'composite'
+  steps:
+    - name: Upload coverage
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-${{ inputs.component }}
+        retention-days: ${{ inputs.retention-days }}
+        include-hidden-files: true
+        path: ${{ inputs.coverage-path }}

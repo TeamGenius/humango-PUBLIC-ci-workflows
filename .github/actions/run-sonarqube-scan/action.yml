@@ -1,0 +1,43 @@
+name: 'Run SonarQube Scan'
+description: 'Execute SonarQube Scanner with configurable settings'
+inputs:
+  sonar-project-key:
+    description: 'SonarQube project key'
+    required: true
+  sonar-project-version:
+    description: 'SonarQube project version'
+    required: true
+  sonar-reference-branch:
+    description: 'SonarQube new code reference branch'
+    required: true
+  sonar-token:
+    description: 'SonarQube authentication token'
+    required: true
+  sonar-host-url:
+    description: 'SonarQube server URL'
+    required: true
+  project-settings-file:
+    description: 'Path to sonar-project.properties file'
+    required: false
+    default: 'sonar-project.properties'
+  extra-args:
+    description: 'Additional SonarQube scanner arguments'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: SonarQube Scan
+      uses: sonarsource/sonarqube-scan-action@master
+      env:
+        SONAR_TOKEN: ${{ inputs.sonar-token }}
+        SONAR_HOST_URL: ${{ inputs.sonar-host-url }}
+        SONAR_SCANNER_OPTS: -Xmx1536m
+      with:
+        args: >
+          -Dproject.settings=${{ inputs.project-settings-file }}
+          -Dsonar.projectKey=${{ inputs.sonar-project-key }}
+          -Dsonar.projectVersion=${{ inputs.sonar-project-version }}
+          -Dsonar.newCode.referenceBranch=${{ inputs.sonar-reference-branch }}
+          ${{ inputs.extra-args }}

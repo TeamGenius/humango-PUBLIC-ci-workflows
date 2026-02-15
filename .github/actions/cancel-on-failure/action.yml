@@ -1,0 +1,13 @@
+name: 'Cancel Workflow on Failure'
+description: 'Cancels the current workflow run if the job fails'
+runs:
+  using: 'composite'
+  steps:
+    - name: Cancel workflow on failure
+      if: ${{ always() && failure() }} # false  # TEMPORARILY DISABLED
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const run_id = context.runId;
+          const { owner, repo } = context.repo;
+          await github.rest.actions.cancelWorkflowRun({ owner, repo, run_id });

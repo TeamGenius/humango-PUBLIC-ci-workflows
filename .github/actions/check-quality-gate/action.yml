@@ -1,0 +1,34 @@
+name: 'Check SonarQube Quality Gate'
+description: 'Check SonarQube quality gate status using report-task.txt'
+inputs:
+  sonar-token:
+    description: 'SonarQube authentication token'
+    required: true
+  report-task-file:
+    description: 'Path to the report-task.txt file'
+    required: false
+    default: '.scannerwork/report-task.txt'
+  check-script-path:
+    description: 'Path to the check_quality_gate.sh script'
+    required: false
+    default: './dev_pipeline/check_quality_gate.sh'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check Quality Gate
+      shell: bash
+      env:
+        SONAR_TOKEN: ${{ inputs.sonar-token }}
+      run: |
+        echo "STEP - Check sonar quality gate (containerized)"
+        docker run --rm \
+          -e SONAR_TOKEN="${SONAR_TOKEN}" \
+          -e REPORT_FILE="${{ inputs.report-task-file }}" \
+          -v $(pwd):/workspace \
+          -w /workspace \
+          debian:bookworm-slim \
+          bash -lc "set -e; \
+            apt-get update && apt-get install -y curl apt-transport-https ca-certificates gnupg jq; \
+            chmod +x ${{ inputs.check-script-path }}; \
+            ${{ inputs.check-script-path }}"

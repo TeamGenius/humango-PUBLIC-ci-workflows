@@ -1,0 +1,21 @@
+name: Print Commit Info (Reusable)
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  print-commit-info:
+    name: Print latest commit info
+    runs-on: [self-hosted, small, gke, linux, preemptible, humango]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Print commit info
+        run: |
+          latest_commit=$(git log -n 1 --pretty=format:'%H')
+          branch_name=$(git symbolic-ref --short -q HEAD || echo "detached")
+          echo "Branch: ${branch_name}"
+          echo "Latest commit: ${latest_commit}"
