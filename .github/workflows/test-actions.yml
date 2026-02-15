@@ -1,0 +1,21 @@
+name: Test Shared Actions
+
+on:
+  pull_request:
+  push:
+    branches: [master, development]
+
+jobs:
+      
+  test-determine-sonar-vars:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/determine-sonar-vars
+        id: sonar
+        with:
+          project-prefix: 'test-project'
+          current-branch: 'main'
+      - run: |
+          echo "Project Key: ${{ steps.sonar.outputs.project-key }}"
+          echo "Reference Branch: ${{ steps.sonar.outputs.reference-branch }}"
