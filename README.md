@@ -1,4 +1,10 @@
-# humango-shared-ci-workflows
+> [!WARNING]
+> **IMPORTANT**: This repository is PUBLIC. Please review all changes carefully before commiting and pushing.
+
+# humango-PUBLIC-ci-workflows
+
+
+
 This repo contains shared ci workflows across all humango repos
 
 ## pre-commit setup
