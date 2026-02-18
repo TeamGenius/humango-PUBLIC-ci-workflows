@@ -35,6 +35,10 @@ runs:
         SONAR_HOST_URL: ${{ inputs.sonar-host-url }}
         SONAR_SCANNER_OPTS: -Xmx1536m
       with:
+        #change the version in the extra_args to control the version of the project and the new code period
+        # new code and branch name set to the PR destination branch and current branch respectively
+        # Branch analysis (i.e., analyzing multiple branches independently) is a feature of SonarQube Developer Edition and above.
+        # use projectKey as fall back instead of branch name key below        
         args: >
           -Dproject.settings=${{ inputs.project-settings-file }}
           -Dsonar.projectKey=${{ inputs.sonar-project-key }}

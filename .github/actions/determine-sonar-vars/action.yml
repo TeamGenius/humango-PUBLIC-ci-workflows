@@ -13,6 +13,10 @@ inputs:
     description: 'Current branch name (from github.ref_name)'
     required: false
     default: ''
+  gcloud-project:
+    description: 'GCP project name (from GCLOUD_PROJECT)'
+    required: false
+    default: 'humango-dev-4'
   project-prefix:
     description: 'Project name prefix (e.g., "humango-mobile" or "humango-backend")'
     required: true
@@ -33,24 +37,27 @@ runs:
       run: |
         set -e
         
-        REF_BRANCH="${{ inputs.default-reference-branch }}"
-        
-        # If this is a PR, use the PR destination branch
-        if [ -n "${{ inputs.pr-base-ref }}" ]; then
-          REF_BRANCH="${{ inputs.pr-base-ref }}"
+        REF_BRANCH="${{ inputs.pr-base-ref }}"
+        if [ -z "$REF_BRANCH" ]; then
+          REF_BRANCH="${{ inputs.default-reference-branch }}"
         fi
-        
-        # Determine project key based on branch
-        if [[ "$REF_BRANCH" == "master" ]] || [[ "${{ inputs.current-branch }}" == "master" ]]; then
-          REF_BRANCH="master"
+
+        REF_GCP_PROJECT="${{ inputs.gcloud-project }}"
+
+        # Determine project key based on branch and environment
+        if [[ "$REF_BRANCH" == "master" ]]; then
           SONAR_PROJECT_KEY="${{ inputs.project-prefix }}-master"
-        elif [[ "$REF_BRANCH" == release/* ]] || [[ "${{ inputs.current-branch }}" == release/* ]] || [[ "$REF_BRANCH" == releases/* ]] || [[ "${{ inputs.current-branch }}" == releases/* ]]; then
-          # For release branches
-          if [[ "$REF_BRANCH" != release/* && "$REF_BRANCH" != releases/* ]]; then
-            # Get the latest release branch
-            git fetch --prune origin '+refs/heads/release/*:refs/remotes/origin/release/*' '+refs/heads/releases/*:refs/remotes/origin/releases/*' >/dev/null 2>&1 || true
-            DETECTED_REF_BRANCH=$(git for-each-ref --sort=-committerdate --format='%(refname:short)' refs/remotes/origin/release/ refs/remotes/origin/releases/ 2>/dev/null | head -n1)
-            echo "Detected latest release branch: $DETECTED_REF_BRANCH"
+        elif [[ "$REF_BRANCH" == *"release/"* ]] || [[ "${{ inputs.current-branch }}" == *"release/"* ]] || [[ "$REF_GCP_PROJECT" == *"humango-alpha"* ]]; then
+          # For release branches or alpha environments
+          if [[ "$REF_BRANCH" != *"release/"* ]]; then
+            # Get the latest release/historical branch
+            git fetch --prune origin '+refs/heads/release/*:refs/remotes/origin/release/*' >/dev/null 2>&1 || true
+            git fetch --prune origin '+refs/heads/historical/*:refs/remotes/origin/historical/*' >/dev/null 2>&1 || true
+            DETECTED_REF_BRANCH=$(git for-each-ref --sort=-committerdate --format='%(refname:short)' \
+              refs/remotes/origin/release/ \
+              refs/remotes/origin/historical/ \
+              2>/dev/null | head -n1)
+            echo "Detected latest release/historical branch: $DETECTED_REF_BRANCH"
             if [[ -n "$DETECTED_REF_BRANCH" ]]; then
               REF_BRANCH=${DETECTED_REF_BRANCH#origin/}
             else
@@ -61,9 +68,9 @@ runs:
         else
           SONAR_PROJECT_KEY="${{ inputs.project-prefix }}"
         fi
-        
-        echo "Reference branch: $REF_BRANCH"
-        echo "SonarQube Project Key: $SONAR_PROJECT_KEY"
+
+        echo "Using reference branch: $REF_BRANCH for sonarqube new code detection"
+        echo "Using SONAR Project Key: $SONAR_PROJECT_KEY"
         
         echo "reference-branch=$REF_BRANCH" >> $GITHUB_OUTPUT
         echo "project-key=$SONAR_PROJECT_KEY" >> $GITHUB_OUTPUT
