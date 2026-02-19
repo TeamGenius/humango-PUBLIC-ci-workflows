@@ -7,12 +7,26 @@ on:
         description: 'GCP Project to deploy to'
         required: true
         type: string
+      master_branch_name:
+        description: 'The name of the master branch'
+        required: false
+        type: string
+        default: 'master'        
       require_master_for_project:
         description: 'Project that requires master branch for deployments'
         required: false
         type: string
         default: 'humango-beta'
-
+      require_master_for_deploy_env:
+        description: 'Deployment environment that requires master branch for deployments'
+        required: false
+        type: string
+        default: 'production' 
+      deploy_env_to_check:
+        description: 'The deployment environment to check (e.g., "production", "staging"). This is used by the front end who can deploy to multiple environments. Do not specify this if not sure'
+        required: false
+        type: string
+        default: 'production'
 permissions:
   contents: read
 
@@ -26,7 +40,8 @@ jobs:
           echo "Branch: ${{ github.ref_name }}"
           echo "GCP Project: ${{ inputs.gcloud_project }}"
           if [ "${{ inputs.gcloud_project }}" == "${{ inputs.require_master_for_project }}" ] && \
-             [ "${{ github.ref_name }}" != "master" ]; then
-            echo "ERROR: Deployments to ${{ inputs.require_master_for_project }} MUST be from master branch"
+             [ "${{ inputs.deploy_env_to_check }}" == "${{ inputs.require_master_for_deploy_env }}" ] && \
+             [ "${{ github.ref_name }}" != "${{ inputs.master_branch_name }}" ]; then
+            echo "ERROR: Deployments to ${{ inputs.require_master_for_project }} in ${{ inputs.require_master_for_deploy_env }} environment MUST be from ${{ inputs.master_branch_name }} branch"
             exit 1
           fi
