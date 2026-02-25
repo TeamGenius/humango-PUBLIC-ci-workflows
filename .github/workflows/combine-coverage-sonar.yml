@@ -21,6 +21,10 @@ on:
         description: 'SonarQube project version'
         type: string
         default: '3.1.0'
+      fail_under:
+        description: 'Minimum coverage percentage required'
+        type: number
+        default: 69
     secrets:
       SONAR_TOKEN:
         description: 'SonarQube authentication token'
@@ -95,11 +99,15 @@ jobs:
             echo "Combining coverage data..."
             coverage combine $coverage_db_files
             
+            # Debug: Check if paths were remapped correctly
+            echo "Checking combined coverage data paths..."
+            coverage debug data | head -20 || true
+            
             # Generate reports
             echo "Generating coverage reports..."
             coverage report
             coverage html -d coverage-reports/coverage-reports-html
-            coverage xml -o coverage-reports/coverage.xml --fail-under=${fail_under}
+            coverage xml -o coverage-reports/coverage.xml --fail-under=${{ inputs.fail_under }}
             
             echo "Coverage combination complete!"
 
