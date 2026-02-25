@@ -25,9 +25,6 @@ on:
       SONAR_TOKEN:
         description: 'SonarQube authentication token'
         required: true
-      SONAR_HOST_URL:
-        description: 'SonarQube server URL'
-        required: false
 
 permissions:
   contents: read
@@ -157,7 +154,7 @@ jobs:
           sonar-project-version: ${{ inputs.sonar_project_version }}
           sonar-reference-branch: ${{ steps.sonar-vars.outputs.reference-branch }}
           sonar-token: ${{ secrets.SONAR_TOKEN }}
-          sonar-host-url: ${{ secrets.SONAR_HOST_URL || vars.SONAR_HOST_URL }}
+          sonar-host-url: ${{ vars.SONAR_HOST_URL }}
           project-settings-file: 'sonar-project.properties'
             
       - name: Check Quality Gate
