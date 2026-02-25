@@ -101,7 +101,8 @@ jobs:
             
             # Debug: Check if paths were remapped correctly
             echo "Checking combined coverage data paths..."
-            coverage debug data | head -20 || true
+            coverage debug data > /tmp/coverage-debug.txt || true
+            head -20 /tmp/coverage-debug.txt || true
             
             # Generate reports
             echo "Generating coverage reports..."
@@ -196,7 +197,7 @@ jobs:
           
       - name: Determine SonarQube settings
         id: sonar-vars
-        uses: ./.github/actions/determine-sonar-vars
+        uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/actions/determine-sonar-vars@master
         with:
           default-reference-branch: ${{ inputs.sonar_reference_branch }}
           pr-base-ref: ''
@@ -204,7 +205,7 @@ jobs:
           project-prefix: 'humango-backend'
           
       - name: SonarQube Scan
-        uses: ./.github/actions/run-sonarqube-scan
+        uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/actions/run-sonarqube-scan@master
         with:
           sonar-project-key: ${{ steps.sonar-vars.outputs.project-key }}
           sonar-project-version: ${{ inputs.sonar_project_version }}
@@ -214,11 +215,11 @@ jobs:
           project-settings-file: 'sonar-project.properties'
             
       - name: Check Quality Gate
-        uses: ./.github/actions/check-quality-gate
+        uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/actions/check-quality-gate@master
         with:
           sonar-token: ${{ secrets.SONAR_TOKEN }}
           
-      - uses: ./.github/actions/upload-coverage
+      - uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/actions/upload-coverage@master
         with:
           component: combined
           coverage-path: |
@@ -226,4 +227,4 @@ jobs:
             coverage-reports/coverage-reports-html/**
           retention-days: 7
           
-      - uses: ./.github/actions/cancel-on-failure
+      - uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/actions/cancel-on-failure@master
