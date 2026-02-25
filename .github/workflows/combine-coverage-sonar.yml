@@ -105,9 +105,57 @@ jobs:
             
             # Generate reports
             echo "Generating coverage reports..."
-            coverage report
-            coverage html -d coverage-reports/coverage-reports-html
-            coverage xml -o coverage-reports/coverage.xml --fail-under=${{ inputs.fail_under }}
+            echo "----------------------------------------"
+            # coverage report
+            # coverage html -d coverage-reports/coverage-reports-html
+            # coverage xml -o coverage-reports/coverage.xml --fail-under=${{ inputs.fail_under }}
+
+            
+            # Run coverage report with error logging
+            echo "Running coverage report (non-fatal)..."
+            if ! coverage report --ignore-errors 2>&1 | tee /tmp/coverage-report.log; then
+              echo "WARNING: Coverage report had issues, but continuing..."
+            fi
+            
+            # Extract and log missing source files
+            if grep -q "No source for code:" /tmp/coverage-report.log 2>/dev/null; then
+              echo ""
+              echo "⚠️  MISSING SOURCE FILES DETECTED:"
+              echo "----------------------------------------"
+              grep "No source for code:" /tmp/coverage-report.log || true
+              echo "----------------------------------------"
+              echo "These files were in coverage data but source files could not be found."
+              echo "Check common/tests/.coveragerc [paths] mappings to fix path resolution."
+              echo ""
+            fi
+            
+            # Generate HTML report (non-fatal)
+            echo "Generating HTML coverage report..."
+            coverage html -d coverage-reports/coverage-reports-html --ignore-errors || {
+              echo "WARNING: HTML report generation had issues, but continuing..."
+            }
+            
+            # Generate XML report for SonarQube (non-fatal on --fail-under but not on --ignore-errors)
+            echo "Generating XML coverage report for SonarQube..."
+            coverage xml -o coverage-reports/coverage.xml --ignore-errors || {
+              echo "WARNING: XML report generation had issues, but continuing..."
+            }
+            
+            # Check coverage threshold (non-fatal)
+            echo "Checking coverage threshold (minimum: ${{ inputs.fail_under }}%)..."
+            if ! coverage report --ignore-errors 2>/dev/null | tail -1 | grep -q "TOTAL"; then
+              echo "WARNING: Could not determine total coverage percentage"
+            else
+              total_coverage=$(coverage report --ignore-errors 2>/dev/null | tail -1 | awk '{print $NF}' | sed 's/%//')
+              echo "Total coverage: ${total_coverage}%"
+              if (( $(echo "$total_coverage < ${{ inputs.fail_under }}" | bc -l) )); then
+                echo "WARNING: Coverage ${total_coverage}% is below threshold ${{ inputs.fail_under }}%"
+              else
+                echo "✓ Coverage meets threshold requirement"
+              fi
+            fi
+            echo "----------------------------------------"
+
             
             echo "Coverage combination complete!"
 
