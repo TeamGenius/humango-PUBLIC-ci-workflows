@@ -32,6 +32,9 @@ Shared GitHub Actions workflows and composite actions used across Humango projec
     default-reference-branch: 'development'
 ```
 
+Optional repo variable for the calling repository:
+- `RELEASE_BRANCH_FOR_ALPHA_DEPLOY`: branch name or pattern used to treat matches as release/alpha for SonarQube (set in repo Variables). Leave blank to disable.
+
 ### Using Shared Workflows
 ```yaml
 jobs:
