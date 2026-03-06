@@ -1,96 +1,167 @@
-name: 'Determine SonarQube Variables'
-description: 'Calculate SonarQube project key and reference branch based on git context'
+name: Determine SonarQube Variables
+description: Calculate SonarQube project key and reference branch based on git context
+
 inputs:
-  default-reference-branch:
-    description: 'Default reference branch for new code detection'
-    required: false
-    default: 'development'
-  pr-base-ref:
-    description: 'Pull request base ref (from github.event.pull_request.base.ref)'
-    required: false
-    default: ''
-  current-branch:
-    description: 'Current branch name (from github.ref_name)'
-    required: false
-    default: ''
-  gcloud-project:
-    description: 'GCP project name (from GCLOUD_PROJECT)'
-    required: false
-    default: 'humango-dev-4'
   project-prefix:
-    description: 'Project name prefix (e.g., "humango-mobile" or "humango-backend")'
+    description: Project name prefix (e.g. humango-backend)
     required: true
+
+  current-branch:
+    description: Current branch (github.ref_name)
+    required: false
+    default: ''
+
+  pr-base-ref:
+    description: Pull request base branch
+    required: false
+    default: ''
+
+  gcloud-project:
+    description: Target GCP project
+    required: false
+    default: humango-dev-4
+
+  default-reference-branch:
+    description: Default reference branch
+    required: false
+    default: development
+
+  release-branch-alpha:
+    description: Manual override of branch used for alpha release deployments
+    required: false
+    default: ''
 
 outputs:
   reference-branch:
-    description: 'Computed SonarQube reference branch'
+    description: Computed Sonar reference branch
     value: ${{ steps.compute.outputs.reference-branch }}
+
   project-key:
-    description: 'Computed SonarQube project key'
+    description: Computed Sonar project key
     value: ${{ steps.compute.outputs.project-key }}
 
 runs:
-  using: 'composite'
+  using: composite
   steps:
     - id: compute
       shell: bash
       run: |
-        set -e
-        
-        # Base branches and repo context
+        set -euo pipefail
+
+        ########################################
+        # Configuration
+        ########################################
+
         CURRENT_BRANCH="${{ inputs.current-branch }}"
         PR_BASE_REF="${{ inputs.pr-base-ref }}"
-        REF_GCP_PROJECT="${{ inputs.gcloud-project }}"
+        GCP_PROJECT="${{ inputs.gcloud-project }}"
+        DEFAULT_REF="${{ inputs.default-reference-branch }}"
+        RELEASE_BRANCH_ALPHA="${{ inputs.release-branch-alpha }}"
+        PROJECT_PREFIX="${{ inputs.project-prefix }}"
 
-        # Use the PR base ref when available, otherwise fall back to the default reference branch.
+        ########################################
+        # Helpers
+        ########################################
+
+        log() {
+          echo "Info: $1"
+        }
+
+        ########################################
+        # Determine initial reference branch
+        ########################################
+
         REF_BRANCH="$PR_BASE_REF"
-        if [ -z "$REF_BRANCH" ]; then
-          REF_BRANCH="${{ inputs.default-reference-branch }}"
+
+        if [[ -z "$REF_BRANCH" ]]; then
+          REF_BRANCH="$DEFAULT_REF"
         fi
 
-        # Repo variable that marks a release branch for alpha deployments.
-        # Each calling repo can define it or leave it blank.
-        RELEASE_BRANCH_ALPHA="${{ vars.RELEASE_BRANCH_FOR_ALPHA_DEPLOY }}"
+        log "initial reference branch: $REF_BRANCH"
 
-        # Check if the current context targets a release branch for alpha deployment.
+        ########################################
+        # Detect alpha release branch
+        ########################################
+
         IS_RELEASE_ALPHA=false
+
         if [[ -n "$RELEASE_BRANCH_ALPHA" ]]; then
-          if [[ "$CURRENT_BRANCH" == *"$RELEASE_BRANCH_ALPHA"* ]] || [[ "$PR_BASE_REF" == *"$RELEASE_BRANCH_ALPHA"* ]]; then
+          if [[ "$CURRENT_BRANCH" == *"$RELEASE_BRANCH_ALPHA"* ]] || \
+             [[ "$PR_BASE_REF" == *"$RELEASE_BRANCH_ALPHA"* ]]; then
+
             IS_RELEASE_ALPHA=true
             REF_BRANCH="$RELEASE_BRANCH_ALPHA"
-            echo "Info: release alpha branch detected: $RELEASE_BRANCH_ALPHA"
+
+            log "alpha release branch detected: $RELEASE_BRANCH_ALPHA"
           fi
         fi
 
-        # Determine project key based on branch and environment.
+        ########################################
+        # Detect latest release/historical branch
+        ########################################
+
+        detect_latest_release_branch() {
+
+          git fetch --prune origin '+refs/heads/release/*:refs/remotes/origin/release/*' >/dev/null 2>&1 || true
+          git fetch --prune origin '+refs/heads/historical/*:refs/remotes/origin/historical/*' >/dev/null 2>&1 || true
+
+          git for-each-ref \
+            --sort=-committerdate \
+            --format='%(refname:short)' \
+            refs/remotes/origin/release/ \
+            refs/remotes/origin/historical/ \
+            2>/dev/null | head -n1
+        }
+
+        ########################################
+        # Determine Sonar project key
+        ########################################
+
         if [[ "$IS_RELEASE_ALPHA" == "true" ]]; then
-          SONAR_PROJECT_KEY="${{ inputs.project-prefix }}-release"
-        elif [[ "$REF_BRANCH" == "master" ]] || [[ "$CURRENT_BRANCH" == "master" ]] || [[ "$REF_GCP_PROJECT" == *"humango-beta"* ]]; then
-          SONAR_PROJECT_KEY="${{ inputs.project-prefix }}-master"
-        elif [[ "$REF_BRANCH" == *"release/"* ]] || [[ "$CURRENT_BRANCH" == *"release/"* ]] || [[ "$REF_GCP_PROJECT" == *"humango-alpha"* ]]; then
-          # For release branches or alpha environments.
+
+          SONAR_PROJECT_KEY="${PROJECT_PREFIX}-release"
+
+        elif [[ "$REF_BRANCH" == "master" ]] || \
+             [[ "$CURRENT_BRANCH" == "master" ]] || \
+             [[ "$GCP_PROJECT" == *"humango-beta"* ]]; then
+
+          SONAR_PROJECT_KEY="${PROJECT_PREFIX}-master"
+
+        elif [[ "$REF_BRANCH" == *"release/"* ]] || \
+             [[ "$CURRENT_BRANCH" == *"release/"* ]] || \
+             [[ "$GCP_PROJECT" == *"humango-alpha"* ]]; then
+
+          ########################################
+          # Ensure reference branch is release/*
+          ########################################
+
           if [[ "$REF_BRANCH" != *"release/"* ]]; then
-            # Get the latest release/historical branch.
-            git fetch --prune origin '+refs/heads/release/*:refs/remotes/origin/release/*' >/dev/null 2>&1 || true
-            git fetch --prune origin '+refs/heads/historical/*:refs/remotes/origin/historical/*' >/dev/null 2>&1 || true
-            DETECTED_REF_BRANCH=$(git for-each-ref --sort=-committerdate --format='%(refname:short)' \
-              refs/remotes/origin/release/ \
-              refs/remotes/origin/historical/ \
-              2>/dev/null | head -n1)
-            echo "Info: latest release/historical branch: $DETECTED_REF_BRANCH"
+
+            DETECTED_REF_BRANCH=$(detect_latest_release_branch)
+
+            log "latest release/historical branch: $DETECTED_REF_BRANCH"
+
             if [[ -n "$DETECTED_REF_BRANCH" ]]; then
-              REF_BRANCH=${DETECTED_REF_BRANCH#origin/}
+              REF_BRANCH="${DETECTED_REF_BRANCH#origin/}"
             else
-              echo "Info: no release/historical branch found"
+              log "no release/historical branch found"
             fi
           fi
-          SONAR_PROJECT_KEY="${{ inputs.project-prefix }}-release"
+
+          SONAR_PROJECT_KEY="${PROJECT_PREFIX}-release"
+
         else
-          SONAR_PROJECT_KEY="${{ inputs.project-prefix }}"
+
+          SONAR_PROJECT_KEY="${PROJECT_PREFIX}"
+
         fi
 
-        echo "Info: sonar reference branch: $REF_BRANCH"
-        echo "Info: sonar project key: $SONAR_PROJECT_KEY"
-        
-        echo "reference-branch=$REF_BRANCH" >> $GITHUB_OUTPUT
-        echo "project-key=$SONAR_PROJECT_KEY" >> $GITHUB_OUTPUT
+        ########################################
+        # Output results
+        ########################################
+
+        log "final sonar reference branch: $REF_BRANCH"
+        log "final sonar project key: $SONAR_PROJECT_KEY"
+
+        echo "reference-branch=$REF_BRANCH" >> "$GITHUB_OUTPUT"
+        echo "project-key=$SONAR_PROJECT_KEY" >> "$GITHUB_OUTPUT"
