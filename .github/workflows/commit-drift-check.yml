@@ -1,0 +1,132 @@
+name: Commit Drift Check
+
+on:
+  workflow_call:
+    inputs:
+      max_behind:
+        type: number
+        default: 5
+      max_ahead:
+        type: number
+        default: 50
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        run: git fetch origin ${{ github.base_ref }}
+
+      - name: Compute drift
+        id: drift
+        run: |
+          BEHIND=$(git rev-list --count HEAD..origin/${{ github.base_ref }})
+          AHEAD=$(git rev-list --count origin/${{ github.base_ref }}..HEAD)
+
+          echo "behind=$BEHIND" >> $GITHUB_OUTPUT
+          echo "ahead=$AHEAD" >> $GITHUB_OUTPUT
+
+      # Optional: try to auto-update branch (safe, won't fail workflow)
+      - name: Attempt auto-update branch
+        if: steps.drift.outputs.behind != '0'
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          script: |
+            try {
+              await github.rest.pulls.updateBranch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+              });
+              core.info("✅ Branch update triggered");
+            } catch (e) {
+              core.warning("⚠️ Auto-update failed: " + e.message);
+            }
+
+      - name: PR Comment (drift report + update link)
+        uses: actions/github-script@v7
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        with:
+          script: |
+            const behind = Number("${{ steps.drift.outputs.behind }}");
+            const ahead = Number("${{ steps.drift.outputs.ahead }}");
+            const maxBehind = Number("${{ inputs.max_behind }}");
+            const maxAhead = Number("${{ inputs.max_ahead }}");
+
+            const baseRef = process.env.BASE_REF;
+            const prNumber = process.env.PR_NUMBER;
+
+            const repoUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`;
+            const prUrl = `${repoUrl}/pull/${prNumber}`;
+
+            const behindStatus = behind > maxBehind ? "❌" : "✅";
+            const aheadStatus = ahead > maxAhead ? "❌" : "✅";
+
+            let suggestion = "";
+            if (behind > 0) {
+              suggestion = `
+### 🔄 Update Required
+This branch is **${behind} commits behind** \`${baseRef}\`.
+
+👉 [Open PR and click "Update branch"](${prUrl})
+
+_This ensures your branch includes the latest changes and passes CI._
+`;
+            }
+
+            const body = `
+### 📊 Commit Drift Report
+
+| Metric | Count | Limit | Status |
+|--------|------:|------:|--------|
+| Behind base | ${behind} | ${maxBehind} | ${behindStatus} |
+| Ahead of base | ${ahead} | ${maxAhead} | ${aheadStatus} |
+
+${suggestion}
+`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c => c.body.includes("📊 Commit Drift Report"));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Fail if limits exceeded
+        run: |
+          if [ "${{ steps.drift.outputs.behind }}" -gt "${{ inputs.max_behind }}" ]; then
+            echo "❌ Branch is too far behind base"
+            exit 1
+          fi
+
+          if [ "${{ steps.drift.outputs.ahead }}" -gt "${{ inputs.max_ahead }}" ]; then
+            echo "❌ PR has too many commits"
+            exit 1
+          fi
