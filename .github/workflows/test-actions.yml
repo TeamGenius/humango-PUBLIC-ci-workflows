@@ -6,7 +6,7 @@ on:
 
 jobs:
   drift:
-    uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/workflows/commit-drift.yml@master
+    uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/workflows/commit-drift-check.yml@master
     with:
       max_behind: 2
       max_ahead: 2
