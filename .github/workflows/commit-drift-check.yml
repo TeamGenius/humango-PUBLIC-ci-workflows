@@ -32,13 +32,7 @@ jobs:
           EVENT_BASE_REF: ${{ github.base_ref }}
           DEFAULT_BASE_REF: ${{ github.event.repository.default_branch }}
         run: |
-          BASE_REF="$INPUT_BASE_REF"
-          if [ -z "$BASE_REF" ]; then
-            BASE_REF="$PR_BASE_REF"
-          fi
-          if [ -z "$BASE_REF" ]; then
-            BASE_REF="${GITHUB_REF_NAME}"
-          fi
+          TARGET_REF="HEAD"
 
           RESOLVED_BASE_REF="$INPUT_BASE_REF"
           if [ -z "$RESOLVED_BASE_REF" ]; then
@@ -90,15 +84,7 @@ jobs:
           echo "Ahead: $AHEAD"
           echo "Status: $STATUS"
 
-      - name: Display drift
-        env:
-          BASE_REF: ${{ steps.drift.outputs.base_ref }}
-          TARGET_REF: ${{ steps.drift.outputs.target_ref }}
-          BEHIND: ${{ steps.drift.outputs.behind }}
-          AHEAD: ${{ steps.drift.outputs.ahead }}
-          MAX_BEHIND: ${{ inputs.max_behind }}
-          MAX_AHEAD: ${{ inputs.max_ahead }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
+      - name: Drift summary
         run: |
           BEHIND="${{ steps.drift.outputs.behind }}"
           AHEAD="${{ steps.drift.outputs.ahead }}"

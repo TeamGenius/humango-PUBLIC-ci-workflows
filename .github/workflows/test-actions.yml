@@ -1,5 +1,4 @@
 name: Test Shared Actions 4
-# update
 
 on:
   pull_request:
@@ -19,7 +18,7 @@ jobs:
   drift:
     uses: ./.github/workflows/commit-drift-check.yml
     with:
-      max_behind: ${{ github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.max_behind) || 2 }}
+      max_behind: ${{ github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.max_behind) || 5 }}
       base_ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_ref || '' }}
 
 # test commit 3
