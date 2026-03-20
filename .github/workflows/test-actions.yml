@@ -1,4 +1,4 @@
-name: Test Shared Actions 2
+name: Test Shared Actions 3
 
 on:
   pull_request:
