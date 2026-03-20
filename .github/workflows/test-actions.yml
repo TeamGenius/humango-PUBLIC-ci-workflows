@@ -8,19 +8,11 @@ on:
       max_behind:
         description: Max commits behind base (0 disables)
         required: true
-        default: '2'
+        default: '1'
       max_ahead:
         description: Max commits ahead of base (0 disables)
         required: true
-        default: '0'
-      compare_ref:
-        description: Branch/ref to compare (empty uses PR head or HEAD)
-        required: false
-        default: ''
-      base_ref:
-        description: Base branch override (empty uses PR base or current ref)
-        required: false
-        default: ''
+        default: '1'
 
 jobs:
   drift-pr:

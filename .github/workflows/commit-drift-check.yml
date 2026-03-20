@@ -8,13 +8,7 @@ on:
         default: 5
       max_ahead:
         type: number
-        default: 50
-      compare_ref:
-        type: string
-        default: ""
-      base_ref:
-        type: string
-        default: ""
+        default: 50        
 
 jobs:
   drift:
@@ -29,8 +23,7 @@ jobs:
       - name: Compute drift
         id: drift
         env:
-          INPUT_COMPARE_REF: ${{ inputs.compare_ref }}
-          INPUT_BASE_REF: ${{ inputs.base_ref }}
+          BASE_REF: ${{ github.base_ref }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_BASE_REF: ${{ github.base_ref }}
         run: |
@@ -42,16 +35,18 @@ jobs:
             BASE_REF="${GITHUB_REF_NAME}"
           fi
 
-          TARGET_REF="HEAD"
-          if [ -n "$INPUT_COMPARE_REF" ]; then
-            git fetch origin "$INPUT_COMPARE_REF"
-            TARGET_REF="origin/$INPUT_COMPARE_REF"
-          elif [ -n "$PR_HEAD_REF" ]; then
-            git fetch origin "$PR_HEAD_REF"
-            TARGET_REF="origin/$PR_HEAD_REF"
+          # if BASE_REF or PR_HEAD_REF is empty, it means that workflow was triggered by a non-PR event so behind and ahead are 0 and we move to next step
+          if [ -z "$BASE_REF" ] || [ -z "$PR_HEAD_REF" ]; then
+            echo "No pull request context, skipping drift check"
+            echo "behind=0" >> $GITHUB_OUTPUT
+            echo "ahead=0" >> $GITHUB_OUTPUT
+            echo "target_ref=$TARGET_REF" >> $GITHUB_OUTPUT
+            echo "base_ref=$BASE_REF" >> $GITHUB_OUTPUT
+            exit 0
           fi
 
-          git fetch origin "$BASE_REF"
+          git fetch origin "$PR_HEAD_REF"
+          TARGET_REF="origin/$PR_HEAD_REF"
 
           BEHIND=$(git rev-list --count "$TARGET_REF".."origin/$BASE_REF")
           AHEAD=$(git rev-list --count "origin/$BASE_REF".."$TARGET_REF")
