@@ -8,17 +8,17 @@ on:
       max_behind:
         description: Max commits behind base (0 disables)
         required: true
-        default: '1'
-      max_ahead:
-        description: Max commits ahead of base (0 disables)
-        required: true
-        default: '1'
+        default: '5'
+      base_ref:
+        description: Base branch to compare against (blank uses PR base/default branch)
+        required: false
+        default: ''
 
 jobs:
   drift:
-    uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/workflows/commit-drift-check.yml@master
+    uses: ./.github/workflows/commit-drift-check.yml
     with:
-      max_behind: 1
-      max_ahead: 1
+      max_behind: ${{ github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.max_behind) || 5 }}
+      base_ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_ref || '' }}
 
 # test commit 3
