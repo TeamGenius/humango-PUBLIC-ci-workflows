@@ -9,9 +9,9 @@ on:
       max_ahead:
         type: number
         default: 50
-
-permissions:
-  pull-requests: write
+      compare_ref:
+        type: string
+        default: ""
 
 jobs:
   drift:
@@ -28,82 +28,53 @@ jobs:
 
       - name: Compute drift
         id: drift
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          COMPARE_REF: ${{ inputs.compare_ref }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          BEHIND=$(git rev-list --count HEAD..origin/${{ github.base_ref }})
-          AHEAD=$(git rev-list --count origin/${{ github.base_ref }}..HEAD)
+          TARGET_REF="HEAD"
+
+          if [ -n "$COMPARE_REF" ]; then
+            git fetch origin "$COMPARE_REF"
+            TARGET_REF="origin/$COMPARE_REF"
+          elif [ -n "$PR_HEAD_REF" ]; then
+            git fetch origin "$PR_HEAD_REF"
+            TARGET_REF="origin/$PR_HEAD_REF"
+          fi
+
+          BEHIND=$(git rev-list --count "$TARGET_REF".."origin/$BASE_REF")
+          AHEAD=$(git rev-list --count "origin/$BASE_REF".."$TARGET_REF")
 
           echo "behind=$BEHIND" >> $GITHUB_OUTPUT
           echo "ahead=$AHEAD" >> $GITHUB_OUTPUT
+          echo "target_ref=$TARGET_REF" >> $GITHUB_OUTPUT
+          echo "base_ref=$BASE_REF" >> $GITHUB_OUTPUT
 
-      - name: PR Comment (drift status)
-        uses: actions/github-script@v7
-        env:
-          BASE_REF: ${{ github.base_ref }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        with:
-          script: |
-            const behind = Number("${{ steps.drift.outputs.behind }}");
-            const ahead = Number("${{ steps.drift.outputs.ahead }}");
-            const maxBehind = Number("${{ inputs.max_behind }}");
-            const maxAhead = Number("${{ inputs.max_ahead }}");
-            const enforceBehind = maxBehind > 0;
-            const enforceAhead = maxAhead > 0;
+          echo "Base branch: $BASE_REF"
+          echo "Current branch/ref: $TARGET_REF"
+          echo "Behind: $BEHIND"
+          echo "Ahead: $AHEAD"
 
-            const baseRef = process.env.BASE_REF;
-            const prNumber = process.env.PR_NUMBER;
+      - name: Drift summary
+        run: |
+          BEHIND="${{ steps.drift.outputs.behind }}"
+          AHEAD="${{ steps.drift.outputs.ahead }}"
+          TARGET_REF="${{ steps.drift.outputs.target_ref }}"
+          BASE_REF="${{ steps.drift.outputs.base_ref }}"
+          MAX_BEHIND="${{ inputs.max_behind }}"
+          MAX_AHEAD="${{ inputs.max_ahead }}"
 
-            const repoUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`;
-            const prUrl = `${repoUrl}/pull/${prNumber}`;
-
-            const behindExceeded = enforceBehind && behind > maxBehind;
-            const aheadExceeded = enforceAhead && ahead > maxAhead;
-            const behindStatus = behindExceeded ? "❌ Exceeded" : (enforceBehind ? "✅ OK" : "⚪ Disabled");
-            const aheadStatus = aheadExceeded ? "❌ Exceeded" : (enforceAhead ? "✅ OK" : "⚪ Disabled");
-
-            const rows = [];
-            if (enforceBehind) {
-              rows.push(`| Behind base | ${behind} | ${maxBehind} | ${behindStatus} |`);
-            }
-            if (enforceAhead) {
-              rows.push(`| Ahead of base | ${ahead} | ${maxAhead} | ${aheadStatus} |`);
-            }
-            const summary = rows.length
-              ? `| Metric | Count | Limit | Status |\n|--------|------:|------:|--------|\n${rows.join("\n")}`
-              : "All drift checks are disabled.";
-
-            const action = behind > 0
-              ? `\n### Action\n👉 [Open this PR and click \"Update branch\"](${prUrl})`
-              : "";
-
-            const body = `
-            ### Commit Drift Check
-
-            ${summary}
-
-            Behind is measured against \`${baseRef}\`. A limit of \`0\` means that check is disabled.
-            ${action}
-            `;
-
-            const { data: comments } = await github.rest.issues.listComments({
-              ...context.repo,
-              issue_number: context.issue.number,
-            });
-
-            const existing = comments.find(c => c.body.includes("### Commit Drift Check"));
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                ...context.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                ...context.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-            }
+          {
+            echo "### Commit Drift Check"
+            echo
+            echo "- Base branch: $BASE_REF"
+            echo "- Current branch/ref: $TARGET_REF"
+            echo "- Behind: $BEHIND (limit: $MAX_BEHIND)"
+            echo "- Ahead: $AHEAD (limit: $MAX_AHEAD)"
+            echo
+            echo "A limit of 0 means that check is disabled."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail if limits exceeded
         run: |
