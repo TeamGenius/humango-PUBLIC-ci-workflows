@@ -9,4 +9,4 @@ jobs:
     uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/workflows/commit-drift-check.yml@master
     with:
       max_behind: 1
-      max_ahead: 0
+      max_ahead: 1
