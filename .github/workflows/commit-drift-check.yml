@@ -6,12 +6,17 @@ on:
       max_behind:
         type: number
         default: 5
-      max_ahead:
-        type: number
-        default: 50        
+      base_ref:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
   drift:
+    name: Commit Drift Gate
     runs-on: ubuntu-latest
 
     steps:
@@ -20,42 +25,64 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Fetch base branch
-        run: git fetch origin ${{ github.base_ref }}
-
       - name: Compute drift
         id: drift
         env:
-          BASE_REF: ${{ github.base_ref }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          INPUT_BASE_REF: ${{ inputs.base_ref }}
+          EVENT_BASE_REF: ${{ github.base_ref }}
+          DEFAULT_BASE_REF: ${{ github.event.repository.default_branch }}
         run: |
           TARGET_REF="HEAD"
 
-          # if BASE_REF or PR_HEAD_REF is empty, it means that workflow was triggered by a non-PR event so behind and ahead are 0 and we move to next step
-          if [ -z "$BASE_REF" ] || [ -z "$PR_HEAD_REF" ]; then
-            echo "No pull request context, skipping drift check"
-            echo "behind=0" >> $GITHUB_OUTPUT
-            echo "ahead=0" >> $GITHUB_OUTPUT
-            echo "target_ref=$TARGET_REF" >> $GITHUB_OUTPUT
-            echo "base_ref=$BASE_REF" >> $GITHUB_OUTPUT
+          RESOLVED_BASE_REF="$INPUT_BASE_REF"
+          if [ -z "$RESOLVED_BASE_REF" ]; then
+            RESOLVED_BASE_REF="$EVENT_BASE_REF"
+          fi
+          if [ -z "$RESOLVED_BASE_REF" ]; then
+            RESOLVED_BASE_REF="$DEFAULT_BASE_REF"
+          fi
+
+          if [ -z "$RESOLVED_BASE_REF" ]; then
+            echo "Unable to determine a base branch for drift calculation."
+            echo "behind=0" >> "$GITHUB_OUTPUT"
+            echo "ahead=0" >> "$GITHUB_OUTPUT"
+            echo "target_ref=$TARGET_REF" >> "$GITHUB_OUTPUT"
+            echo "base_ref=" >> "$GITHUB_OUTPUT"
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+            echo "message=No base branch available for drift check." >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          git fetch origin "$PR_HEAD_REF"
-          TARGET_REF="origin/$PR_HEAD_REF"
+          git fetch origin "$RESOLVED_BASE_REF"
 
-          BEHIND=$(git rev-list --count "$TARGET_REF".."origin/$BASE_REF")
-          AHEAD=$(git rev-list --count "origin/$BASE_REF".."$TARGET_REF")
+          BASE_TARGET="origin/$RESOLVED_BASE_REF"
+          BEHIND=$(git rev-list --count "$TARGET_REF".."$BASE_TARGET")
+          AHEAD=$(git rev-list --count "$BASE_TARGET".."$TARGET_REF")
 
-          echo "behind=$BEHIND" >> $GITHUB_OUTPUT
-          echo "ahead=$AHEAD" >> $GITHUB_OUTPUT
-          echo "target_ref=$TARGET_REF" >> $GITHUB_OUTPUT
-          echo "base_ref=$BASE_REF" >> $GITHUB_OUTPUT
+          MAX_BEHIND="${{ inputs.max_behind }}"
+          if [ "$MAX_BEHIND" -eq 0 ]; then
+            STATUS="pass"
+            MESSAGE="Behind check disabled"
+          elif [ "$BEHIND" -le "$MAX_BEHIND" ]; then
+            STATUS="pass"
+            MESSAGE="Within allowed commit drift"
+          else
+            STATUS="fail"
+            MESSAGE="Branch is behind base by more than allowed"
+          fi
 
-          echo "Base branch: $BASE_REF"
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          echo "ahead=$AHEAD" >> "$GITHUB_OUTPUT"
+          echo "target_ref=$TARGET_REF" >> "$GITHUB_OUTPUT"
+          echo "base_ref=$RESOLVED_BASE_REF" >> "$GITHUB_OUTPUT"
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "message=$MESSAGE" >> "$GITHUB_OUTPUT"
+
+          echo "Base branch: $RESOLVED_BASE_REF"
           echo "Current branch/ref: $TARGET_REF"
           echo "Behind: $BEHIND"
           echo "Ahead: $AHEAD"
+          echo "Status: $STATUS"
 
       - name: Drift summary
         run: |
@@ -64,7 +91,7 @@ jobs:
           TARGET_REF="${{ steps.drift.outputs.target_ref }}"
           BASE_REF="${{ steps.drift.outputs.base_ref }}"
           MAX_BEHIND="${{ inputs.max_behind }}"
-          MAX_AHEAD="${{ inputs.max_ahead }}"
+          STATUS="${{ steps.drift.outputs.status }}"
 
           {
             echo "### Commit Drift Check"
@@ -72,19 +99,103 @@ jobs:
             echo "- Base branch: $BASE_REF"
             echo "- Current branch/ref: $TARGET_REF"
             echo "- Behind: $BEHIND (limit: $MAX_BEHIND)"
-            echo "- Ahead: $AHEAD (limit: $MAX_AHEAD)"
+            echo "- Ahead: $AHEAD (informational only)"
             echo
-            echo "A limit of 0 means that check is disabled."
+            if [ "$MAX_BEHIND" = "0" ]; then
+              echo "ℹ️ Behind check is disabled because max_behind is set to 0."
+            elif [ "$STATUS" = "pass" ]; then
+              echo "✅ Drift is within allowed threshold."
+            elif [ "$STATUS" = "fail" ]; then
+              echo "❌ This PR is too far behind to merge safely with the configured threshold."
+              echo
+              echo "### Required Action"
+              echo "- Option 1 (GitHub UI): Use the **Update branch** button on the PR if available."
+              echo "- Option 2 (local git):"
+              echo "  - git fetch origin"
+              echo "  - git checkout \"${{ github.head_ref || github.ref_name }}\""
+              echo "  - git rebase \"origin/$BASE_REF\""
+              echo "  - git push --force-with-lease"
+            else
+              echo "ℹ️ Drift check skipped because no base branch could be determined."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Fail if limits exceeded
-        run: |
-          if [ "${{ inputs.max_behind }}" -gt 0 ] && [ "${{ steps.drift.outputs.behind }}" -gt "${{ inputs.max_behind }}" ]; then
-            echo "❌ Branch is too far behind base"
-            exit 1
-          fi
+      - name: Upsert PR feedback comment
+        if: ${{ github.event.pull_request.number != null && steps.drift.outputs.status != 'skipped' }}
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          BEHIND: ${{ steps.drift.outputs.behind }}
+          MAX_BEHIND: ${{ inputs.max_behind }}
+          BASE_REF: ${{ steps.drift.outputs.base_ref }}
+          STATUS: ${{ steps.drift.outputs.status }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        with:
+          script: |
+            const marker = '<!-- commit-drift-check -->';
+            const prNumber = context.payload.pull_request.number;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const statusLine = process.env.STATUS === 'pass'
+              ? `✅ This PR is within drift threshold (${process.env.BEHIND}/${process.env.MAX_BEHIND} behind).`
+              : `❌ This PR is ${process.env.BEHIND} commits behind ${process.env.BASE_REF} (limit: ${process.env.MAX_BEHIND}).`;
 
-          if [ "${{ inputs.max_ahead }}" -gt 0 ] && [ "${{ steps.drift.outputs.ahead }}" -gt "${{ inputs.max_ahead }}" ]; then
-            echo "❌ PR has too many commits"
+            const body = [
+              marker,
+              '### Commit Drift Gate',
+              '',
+              statusLine,
+              '',
+              process.env.STATUS === 'fail'
+                ? 'Required action before merge:'
+                : 'No action required.',
+              process.env.STATUS === 'fail'
+                ? '- Option 1 (GitHub UI): click **Update branch** on this PR (when available).'
+                : '',
+              process.env.STATUS === 'fail'
+                ? '- Option 2 (local git):'
+                : '',
+              process.env.STATUS === 'fail'
+                ? `  - git fetch origin`
+                : '',
+              process.env.STATUS === 'fail'
+                ? `  - git checkout "${process.env.HEAD_REF}"`
+                : '',
+              process.env.STATUS === 'fail'
+                ? `  - git rebase "origin/${process.env.BASE_REF}"`
+                : '',
+              process.env.STATUS === 'fail'
+                ? '  - git push --force-with-lease'
+                : ''
+            ].filter(Boolean).join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: prNumber,
+              per_page: 100
+            });
+
+            const existing = comments.find((c) => c.user?.type === 'Bot' && c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body
+              });
+            }
+
+      - name: Fail if behind limit exceeded
+        run: |
+          if [ "${{ steps.drift.outputs.status }}" = "fail" ]; then
+            echo "❌ Branch is too far behind base. See summary and PR comment for next steps."
             exit 1
           fi
