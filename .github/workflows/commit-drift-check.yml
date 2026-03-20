@@ -78,25 +78,25 @@ jobs:
             let suggestion = "";
             if (behind > 0) {
               suggestion = `
-### 🔄 Update Required
-This branch is **${behind} commits behind** \`${baseRef}\`.
+            ### 🔄 Update Required
+            This branch is **${behind} commits behind** \`${baseRef}\`.
 
-👉 [Open PR and click "Update branch"](${prUrl})
+            👉 [Open PR and click "Update branch"](${prUrl})
 
-_This ensures your branch includes the latest changes and passes CI._
-`;
+            _This ensures your branch includes the latest changes and passes CI._
+            `;
             }
 
             const body = `
-### 📊 Commit Drift Report
+            ### 📊 Commit Drift Report
 
-| Metric | Count | Limit | Status |
-|--------|------:|------:|--------|
-| Behind base | ${behind} | ${maxBehind} | ${behindStatus} |
-| Ahead of base | ${ahead} | ${maxAhead} | ${aheadStatus} |
+            | Metric | Count | Limit | Status |
+            |--------|------:|------:|--------|
+            | Behind base | ${behind} | ${maxBehind} | ${behindStatus} |
+            | Ahead of base | ${ahead} | ${maxAhead} | ${aheadStatus} |
 
-${suggestion}
-`;
+            ${suggestion}
+            `;
 
             const { data: comments } = await github.rest.issues.listComments({
               ...context.repo,
