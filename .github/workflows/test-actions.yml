@@ -15,19 +15,8 @@ on:
         default: '1'
 
 jobs:
-  drift-pr:
-    if: github.event_name == 'pull_request'
+  drift:
     uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/workflows/commit-drift-check.yml@master
     with:
       max_behind: 2
       max_ahead: 0
-      compare_ref: ${{ github.head_ref }}
-
-  drift-manual:
-    if: github.event_name == 'workflow_dispatch'
-    uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/workflows/commit-drift-check.yml@master
-    with:
-      max_behind: ${{ inputs.max_behind }}
-      max_ahead: ${{ inputs.max_ahead }}
-      compare_ref: ${{ inputs.compare_ref }}
-      base_ref: ${{ inputs.base_ref }}
