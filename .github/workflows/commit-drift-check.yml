@@ -11,7 +11,6 @@ on:
         default: 50
 
 permissions:
-  contents: write
   pull-requests: write
 
 jobs:
@@ -61,6 +60,17 @@ jobs:
             const behindStatus = behindExceeded ? "❌ Exceeded" : (enforceBehind ? "✅ OK" : "⚪ Disabled");
             const aheadStatus = aheadExceeded ? "❌ Exceeded" : (enforceAhead ? "✅ OK" : "⚪ Disabled");
 
+            const rows = [];
+            if (enforceBehind) {
+              rows.push(`| Behind base | ${behind} | ${maxBehind} | ${behindStatus} |`);
+            }
+            if (enforceAhead) {
+              rows.push(`| Ahead of base | ${ahead} | ${maxAhead} | ${aheadStatus} |`);
+            }
+            const summary = rows.length
+              ? `| Metric | Count | Limit | Status |\n|--------|------:|------:|--------|\n${rows.join("\n")}`
+              : "All drift checks are disabled.";
+
             const action = behind > 0
               ? `\n### Action\n👉 [Open this PR and click \"Update branch\"](${prUrl})`
               : "";
@@ -68,10 +78,7 @@ jobs:
             const body = `
             ### Commit Drift Check
 
-            | Metric | Count | Limit | Status |
-            |--------|------:|------:|--------|
-            | Behind base | ${behind} | ${maxBehind} | ${behindStatus} |
-            | Ahead of base | ${ahead} | ${maxAhead} | ${aheadStatus} |
+            ${summary}
 
             Behind is measured against \`${baseRef}\`. A limit of \`0\` means that check is disabled.
             ${action}
