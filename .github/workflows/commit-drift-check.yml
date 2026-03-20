@@ -9,9 +9,12 @@ on:
       max_ahead:
         type: number
         default: 50
-
-permissions:
-  pull-requests: write
+      compare_ref:
+        type: string
+        default: ""
+      base_ref:
+        type: string
+        default: ""
 
 jobs:
   drift:
@@ -23,87 +26,85 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Fetch base branch
-        run: git fetch origin ${{ github.base_ref }}
-
       - name: Compute drift
         id: drift
+        env:
+          INPUT_COMPARE_REF: ${{ inputs.compare_ref }}
+          INPUT_BASE_REF: ${{ inputs.base_ref }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_BASE_REF: ${{ github.base_ref }}
         run: |
-          BEHIND=$(git rev-list --count HEAD..origin/${{ github.base_ref }})
-          AHEAD=$(git rev-list --count origin/${{ github.base_ref }}..HEAD)
+          BASE_REF="$INPUT_BASE_REF"
+          if [ -z "$BASE_REF" ]; then
+            BASE_REF="$PR_BASE_REF"
+          fi
+          if [ -z "$BASE_REF" ]; then
+            BASE_REF="${GITHUB_REF_NAME}"
+          fi
+
+          TARGET_REF="HEAD"
+          if [ -n "$INPUT_COMPARE_REF" ]; then
+            git fetch origin "$INPUT_COMPARE_REF"
+            TARGET_REF="origin/$INPUT_COMPARE_REF"
+          elif [ -n "$PR_HEAD_REF" ]; then
+            git fetch origin "$PR_HEAD_REF"
+            TARGET_REF="origin/$PR_HEAD_REF"
+          fi
+
+          git fetch origin "$BASE_REF"
+
+          BEHIND=$(git rev-list --count "$TARGET_REF".."origin/$BASE_REF")
+          AHEAD=$(git rev-list --count "origin/$BASE_REF".."$TARGET_REF")
+
+          echo "base_ref=$BASE_REF" >> $GITHUB_OUTPUT
+          echo "target_ref=$TARGET_REF" >> $GITHUB_OUTPUT
 
           echo "behind=$BEHIND" >> $GITHUB_OUTPUT
           echo "ahead=$AHEAD" >> $GITHUB_OUTPUT
 
-      - name: PR Comment (drift status)
-        uses: actions/github-script@v7
+      - name: Display drift
         env:
-          BASE_REF: ${{ github.base_ref }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        with:
-          script: |
-            const behind = Number("${{ steps.drift.outputs.behind }}");
-            const ahead = Number("${{ steps.drift.outputs.ahead }}");
-            const maxBehind = Number("${{ inputs.max_behind }}");
-            const maxAhead = Number("${{ inputs.max_ahead }}");
-            const enforceBehind = maxBehind > 0;
-            const enforceAhead = maxAhead > 0;
+          BASE_REF: ${{ steps.drift.outputs.base_ref }}
+          TARGET_REF: ${{ steps.drift.outputs.target_ref }}
+          BEHIND: ${{ steps.drift.outputs.behind }}
+          AHEAD: ${{ steps.drift.outputs.ahead }}
+          MAX_BEHIND: ${{ inputs.max_behind }}
+          MAX_AHEAD: ${{ inputs.max_ahead }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          echo "base_ref=$BASE_REF"
+          echo "target_ref=$TARGET_REF"
+          echo "behind=$BEHIND"
+          echo "ahead=$AHEAD"
 
-            const baseRef = process.env.BASE_REF;
-            const prNumber = process.env.PR_NUMBER;
-
-            const repoUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`;
-            const prUrl = `${repoUrl}/pull/${prNumber}`;
-
-            const behindExceeded = enforceBehind && behind > maxBehind;
-            const aheadExceeded = enforceAhead && ahead > maxAhead;
-            const behindStatus = behindExceeded ? "❌ Exceeded" : (enforceBehind ? "✅ OK" : "⚪ Disabled");
-            const aheadStatus = aheadExceeded ? "❌ Exceeded" : (enforceAhead ? "✅ OK" : "⚪ Disabled");
-
-            const rows = [];
-            if (enforceBehind) {
-              rows.push(`| Behind base | ${behind} | ${maxBehind} | ${behindStatus} |`);
-            }
-            if (enforceAhead) {
-              rows.push(`| Ahead of base | ${ahead} | ${maxAhead} | ${aheadStatus} |`);
-            }
-            const summary = rows.length
-              ? `| Metric | Count | Limit | Status |\n|--------|------:|------:|--------|\n${rows.join("\n")}`
-              : "All drift checks are disabled.";
-
-            const action = behind > 0
-              ? `\n### Action\n👉 [Open this PR and click \"Update branch\"](${prUrl})`
-              : "";
-
-            const body = `
-            ### Commit Drift Check
-
-            ${summary}
-
-            Behind is measured against \`${baseRef}\`. A limit of \`0\` means that check is disabled.
-            ${action}
-            `;
-
-            const { data: comments } = await github.rest.issues.listComments({
-              ...context.repo,
-              issue_number: context.issue.number,
-            });
-
-            const existing = comments.find(c => c.body.includes("### Commit Drift Check"));
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                ...context.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                ...context.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-            }
+          {
+            echo "### Commit Drift Check"
+            echo
+            echo "- Base branch: \`$BASE_REF\`"
+            echo "- Compared ref: \`$TARGET_REF\`"
+            echo
+            if [ "$MAX_BEHIND" -gt 0 ]; then
+              if [ "$BEHIND" -gt "$MAX_BEHIND" ]; then
+                echo "- Behind: $BEHIND / $MAX_BEHIND (exceeded)"
+              else
+                echo "- Behind: $BEHIND / $MAX_BEHIND (ok)"
+              fi
+            fi
+            if [ "$MAX_AHEAD" -gt 0 ]; then
+              if [ "$AHEAD" -gt "$MAX_AHEAD" ]; then
+                echo "- Ahead: $AHEAD / $MAX_AHEAD (exceeded)"
+              else
+                echo "- Ahead: $AHEAD / $MAX_AHEAD (ok)"
+              fi
+            fi
+            if [ "$MAX_BEHIND" -le 0 ] && [ "$MAX_AHEAD" -le 0 ]; then
+              echo "- All drift checks are disabled."
+            fi
+            if [ "$BEHIND" -gt 0 ] && [ -n "$PR_URL" ]; then
+              echo
+              echo "Action: [Open PR and click Update branch]($PR_URL)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail if limits exceeded
         run: |

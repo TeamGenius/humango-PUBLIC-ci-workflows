@@ -3,11 +3,39 @@ name: Test Shared Actions
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      max_behind:
+        description: Max commits behind base (0 disables)
+        required: true
+        default: '2'
+      max_ahead:
+        description: Max commits ahead of base (0 disables)
+        required: true
+        default: '0'
+      compare_ref:
+        description: Branch/ref to compare (empty uses PR head or HEAD)
+        required: false
+        default: ''
+      base_ref:
+        description: Base branch override (empty uses PR base or current ref)
+        required: false
+        default: ''
 
 jobs:
-  drift:
+  drift-pr:
+    if: github.event_name == 'pull_request'
     uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/workflows/commit-drift-check.yml@master
     with:
       max_behind: 2
       max_ahead: 0
-# nice
+      compare_ref: ${{ github.head_ref }}
+
+  drift-manual:
+    if: github.event_name == 'workflow_dispatch'
+    uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/workflows/commit-drift-check.yml@master
+    with:
+      max_behind: ${{ inputs.max_behind }}
+      max_ahead: ${{ inputs.max_ahead }}
+      compare_ref: ${{ inputs.compare_ref }}
+      base_ref: ${{ inputs.base_ref }}
