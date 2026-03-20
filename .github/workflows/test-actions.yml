@@ -8,5 +8,5 @@ jobs:
   drift:
     uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/workflows/commit-drift.yml@master
     with:
-      max_behind: 1
-      max_ahead: 1
+      max_behind: 2
+      max_ahead: 2
