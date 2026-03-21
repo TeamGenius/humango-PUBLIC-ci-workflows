@@ -1,8 +1,10 @@
-name: Test Shared Actions 4
+name: Cron Check commit drift on ALL PRs
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+  # pull_request:
+  #   types: [opened, synchronize, reopened, ready_for_review]
+  # schedule:
+  #   - cron: '*/10 * * * *'
   workflow_dispatch:
     inputs:
       max_behind:
@@ -14,11 +16,273 @@ on:
         required: false
         default: ''
 
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: commit-drift-${{ github.workflow }}-${{ github.repository }}-${{ github.ref_name || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
+  # Resolves the per-branch max_behind threshold from DRIFT_THRESHOLDS repo variable (or built-in defaults)
+  resolve_pr_threshold:
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+    runs-on: [self-hosted, small, gke, linux, preemptible, humango]
+    outputs:
+      max_behind: ${{ steps.resolve.outputs.max_behind }}
+    steps:
+      - name: Resolve threshold for base branch
+        id: resolve
+        uses: actions/github-script@v7
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          DRIFT_THRESHOLDS: ${{ vars.DRIFT_THRESHOLDS }}
+          DISPATCH_MAX_BEHIND: ${{ github.event.inputs.max_behind }}
+          EVENT_NAME: ${{ github.event_name }}
+        with:
+          script: |
+            // workflow_dispatch always uses its explicit input directly
+            if (process.env.EVENT_NAME === 'workflow_dispatch') {
+              core.setOutput('max_behind', process.env.DISPATCH_MAX_BEHIND || '5');
+              return;
+            }
+
+            const baseRef = process.env.BASE_REF || '';
+            const rawThresholds = process.env.DRIFT_THRESHOLDS || '';
+
+            const matchRule = (base, rule) => {
+              if (rule.match === 'equal') return base === rule.pattern;
+              if (rule.match === 'startsWith') return base.startsWith(rule.pattern);
+              if (rule.match === 'contains') return base.includes(rule.pattern);
+              return false;
+            };
+
+            if (rawThresholds) {
+              try {
+                const rules = JSON.parse(rawThresholds);
+                for (const rule of rules) {
+                  if (matchRule(baseRef, rule)) {
+                    core.info(`Matched rule ${JSON.stringify(rule)} for base "${baseRef}"`);
+                    core.setOutput('max_behind', String(rule.max_behind));
+                    return;
+                  }
+                }
+                core.info(`No DRIFT_THRESHOLDS rule matched base "${baseRef}"; using built-in defaults`);
+              } catch (e) {
+                core.warning(`Failed to parse DRIFT_THRESHOLDS: ${e.message}; using built-in defaults`);
+              }
+            }
+
+            // Built-in defaults (also used as fallback when variable is set but no rule matches)
+            const defaults = [
+              { match: 'equal', pattern: 'master', max_behind: 2 },
+              { match: 'equal', pattern: 'main', max_behind: 2 },
+              { match: 'equal', pattern: 'development', max_behind: 5 },
+              { match: 'startsWith', pattern: 'release/', max_behind: 3 },
+              { match: 'startsWith', pattern: 'hotfix/', max_behind: 2 }
+            ];
+            for (const rule of defaults) {
+              if (matchRule(baseRef, rule)) {
+                core.setOutput('max_behind', String(rule.max_behind));
+                return;
+              }
+            }
+            core.setOutput('max_behind', '5');
+
+  # Runs on pull_request and workflow_dispatch only
   drift:
+    needs: [resolve_pr_threshold]
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
     uses: ./.github/workflows/commit-drift-check.yml
     with:
-      max_behind: ${{ github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.max_behind) || 5 }}
+      max_behind: ${{ fromJSON(needs.resolve_pr_threshold.outputs.max_behind) }}
       base_ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_ref || '' }}
 
-# test commit 3
+  # Runs on schedule/workflow_dispatch: discovers relevant PRs and builds a refresh matrix
+  discover:
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: [self-hosted, small, gke, linux, preemptible, humango]
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - name: List relevant open PRs
+        id: list
+        uses: actions/github-script@v7
+        env:
+          DRIFT_THRESHOLDS: ${{ vars.DRIFT_THRESHOLDS }}
+        with:
+          script: |
+            const workflowRef = process.env.GITHUB_WORKFLOW_REF || '';
+            const workflowPathMatch = workflowRef.match(/\.github\/workflows\/([^@]+)@/);
+            const workflowId = workflowPathMatch ? workflowPathMatch[1] : 'test-actions.yml';
+
+            let lastScheduledRunAt = null;
+            try {
+              const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: workflowId,
+                event: 'schedule',
+                per_page: 100
+              });
+
+              const previousScheduledRun = runs.find((run) => run.id !== context.runId);
+              if (previousScheduledRun?.created_at) {
+                lastScheduledRunAt = Date.parse(previousScheduledRun.created_at);
+              }
+            } catch (error) {
+              core.warning(`Unable to resolve previous scheduled run timestamp: ${error.message}`);
+            }
+
+            const candidates = await github.paginate(github.rest.pulls.list, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+
+            const rawThresholds = process.env.DRIFT_THRESHOLDS || '';
+
+            const matchRule = (base, rule) => {
+              if (rule.match === 'equal') return base === rule.pattern;
+              if (rule.match === 'startsWith') return base.startsWith(rule.pattern);
+              if (rule.match === 'contains') return base.includes(rule.pattern);
+              return false;
+            };
+
+            const builtInDefaults = [
+              { match: 'equal', pattern: 'master', max_behind: 2 },
+              { match: 'equal', pattern: 'main', max_behind: 2 },
+              { match: 'equal', pattern: 'development', max_behind: 5 },
+              { match: 'startsWith', pattern: 'release/', max_behind: 3 },
+              { match: 'startsWith', pattern: 'hotfix/', max_behind: 2 }
+            ];
+
+            let thresholdRules = null;
+            if (rawThresholds) {
+              try {
+                thresholdRules = JSON.parse(rawThresholds);
+              } catch (e) {
+                core.warning(`Failed to parse DRIFT_THRESHOLDS: ${e.message}; using built-in defaults`);
+              }
+            }
+
+            const thresholdForBase = (base) => {
+              const rules = thresholdRules ?? builtInDefaults;
+              for (const rule of rules) {
+                if (matchRule(base, rule)) return rule.max_behind;
+              }
+              return null;
+            };
+
+            const commitTimestampCache = new Map();
+
+            const getCommitTimestamp = async (sha) => {
+              if (!sha) {
+                return null;
+              }
+              if (commitTimestampCache.has(sha)) {
+                return commitTimestampCache.get(sha);
+              }
+
+              try {
+                const commit = await github.rest.repos.getCommit({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: sha
+                });
+                const timestamp = Date.parse(
+                  commit.data?.commit?.committer?.date || commit.data?.commit?.author?.date || ''
+                );
+                const parsed = Number.isNaN(timestamp) ? null : timestamp;
+                commitTimestampCache.set(sha, parsed);
+                return parsed;
+              } catch (error) {
+                core.warning(`Unable to load commit ${sha}: ${error.message}`);
+                commitTimestampCache.set(sha, null);
+                return null;
+              }
+            };
+
+            const matrix = [];
+            for (const pr of candidates) {
+              const maxBehind = thresholdForBase(pr.base.ref);
+              if (maxBehind === null) {
+                continue;
+              }
+
+              let include = true;
+              if (context.eventName === 'schedule' && lastScheduledRunAt !== null) {
+                const prUpdatedAt = Date.parse(pr.updated_at);
+                const prUpdatedSinceLastRun = !Number.isNaN(prUpdatedAt)
+                  ? prUpdatedAt > lastScheduledRunAt
+                  : false;
+
+                if (prUpdatedSinceLastRun) {
+                  matrix.push({
+                    pr: pr.number,
+                    head_sha: pr.head.sha,
+                    head_ref: pr.head.ref,
+                    base_ref: pr.base.ref,
+                    max_behind: maxBehind
+                  });
+                  continue;
+                }
+
+                const [headCommitAt, baseCommitAt] = await Promise.all([
+                  getCommitTimestamp(pr.head.sha),
+                  getCommitTimestamp(pr.base.sha)
+                ]);
+
+                const headBranchUpdatedSinceLastRun = headCommitAt !== null
+                  ? headCommitAt > lastScheduledRunAt
+                  : false;
+                const baseBranchUpdatedSinceLastRun = baseCommitAt !== null
+                  ? baseCommitAt > lastScheduledRunAt
+                  : false;
+
+                include =
+                  prUpdatedSinceLastRun ||
+                  headBranchUpdatedSinceLastRun ||
+                  baseBranchUpdatedSinceLastRun;
+              }
+
+              if (!include) {
+                continue;
+              }
+
+              matrix.push({
+                pr: pr.number,
+                head_sha: pr.head.sha,
+                head_ref: pr.head.ref,
+                base_ref: pr.base.ref,
+                max_behind: maxBehind
+              });
+            }
+
+            if (lastScheduledRunAt !== null) {
+              core.info(`Filtering PRs updated after ${new Date(lastScheduledRunAt).toISOString()}`);
+            } else {
+              core.info('No previous scheduled run found; including all configured PRs.');
+            }
+
+            core.info(`Relevant PR count: ${matrix.length}`);
+            core.setOutput('matrix', JSON.stringify(matrix));
+
+  # Refreshes commit status on relevant PR heads on a schedule
+  refresh:
+    needs: discover
+    if: ${{ needs.discover.outputs.matrix != '[]' && needs.discover.outputs.matrix != '' }}
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.matrix) }}
+      max-parallel: 5
+    uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/workflows/commit-drift-check.yml
+    with:
+      head_sha: ${{ matrix.head_sha }}
+      head_ref: ${{ matrix.head_ref }}
+      pr_number: ${{ matrix.pr }}
+      base_ref: ${{ matrix.base_ref }}
+      max_behind: ${{ matrix.max_behind }}

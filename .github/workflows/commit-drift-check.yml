@@ -1,4 +1,4 @@
-name: Commit Drift Check
+name: (Reusable) Commit Drift Check
 
 on:
   workflow_call:
@@ -9,15 +9,31 @@ on:
       base_ref:
         type: string
         default: ''
+      head_sha:
+        description: 'PR head commit SHA (used when called from a push-triggered matrix job)'
+        type: string
+        default: ''
+      head_ref:
+        description: 'PR head branch name (used for remediation guidance in non-PR events)'
+        type: string
+        default: ''
+      pr_number:
+        description: 'PR number (used when called from a push-triggered matrix job)'
+        type: number
+        default: 0
 
 permissions:
   contents: read
   pull-requests: write
+  statuses: write
 
 jobs:
   drift:
     name: Commit Drift Gate
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, small, gke, linux, preemptible, humango]
+    concurrency:
+      group: commit-drift-pr-${{ github.repository }}-${{ github.event.pull_request.number || inputs.pr_number || github.ref_name }}
+      cancel-in-progress: true
 
     steps:
       - name: Checkout repo
@@ -32,7 +48,10 @@ jobs:
           EVENT_BASE_REF: ${{ github.base_ref }}
           DEFAULT_BASE_REF: ${{ github.event.repository.default_branch }}
         run: |
-          TARGET_REF="HEAD"
+          TARGET_REF="${{ inputs.head_sha }}"
+          if [ -z "$TARGET_REF" ]; then
+            TARGET_REF="HEAD"
+          fi
 
           RESOLVED_BASE_REF="$INPUT_BASE_REF"
           if [ -z "$RESOLVED_BASE_REF" ]; then
@@ -85,6 +104,9 @@ jobs:
           echo "Status: $STATUS"
 
       - name: Drift summary
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
         run: |
           BEHIND="${{ steps.drift.outputs.behind }}"
           AHEAD="${{ steps.drift.outputs.ahead }}"
@@ -100,6 +122,9 @@ jobs:
             echo "- Current branch/ref: $TARGET_REF"
             echo "- Behind: $BEHIND (limit: $MAX_BEHIND)"
             echo "- Ahead: $AHEAD (informational only)"
+            if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "0" ]; then
+              echo "- PR: $REPO_URL/pull/$PR_NUMBER"
+            fi
             echo
             if [ "$MAX_BEHIND" = "0" ]; then
               echo "ℹ️ Behind check is disabled because max_behind is set to 0."
@@ -111,17 +136,22 @@ jobs:
               echo "### Required Action"
               echo "- Option 1 (GitHub UI): Use the **Update branch** button on the PR if available."
               echo "- Option 2 (local git):"
-              echo "  - git fetch origin"
-              echo "  - git checkout \"${{ github.head_ref || github.ref_name }}\""
-              echo "  - git rebase \"origin/$BASE_REF\""
-              echo "  - git push --force-with-lease"
+              echo "  1. Update your local base branch:"
+              echo "     \`git pull origin $BASE_REF\`"
+              echo "  2. Switch to the head branch:"
+              echo "     \`git checkout ${{ github.head_ref || github.ref_name }}\`"
+              echo "  3. Merge the base branch into the head branch:"
+              echo "     \`git merge $BASE_REF\`"
+              echo "  4. If there are conflicts, resolve them and commit the result."
+              echo "  5. Push the changes:"
+              echo "     \`git push -u origin ${{ github.head_ref || github.ref_name }}\`"
             else
               echo "ℹ️ Drift check skipped because no base branch could be determined."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upsert PR feedback comment
-        if: ${{ github.event.pull_request.number != null && steps.drift.outputs.status != 'skipped' }}
+        if: ${{ (github.event.pull_request.number != null || inputs.pr_number != 0) && steps.drift.outputs.status != 'skipped' }}
         continue-on-error: true
         uses: actions/github-script@v7
         env:
@@ -129,11 +159,12 @@ jobs:
           MAX_BEHIND: ${{ inputs.max_behind }}
           BASE_REF: ${{ steps.drift.outputs.base_ref }}
           STATUS: ${{ steps.drift.outputs.status }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref || inputs.head_ref }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
         with:
           script: |
             const marker = '<!-- commit-drift-check -->';
-            const prNumber = context.payload.pull_request.number;
+            const prNumber = context.payload.pull_request?.number ?? Number(process.env.INPUT_PR_NUMBER);
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const statusLine = process.env.STATUS === 'pass'
@@ -156,16 +187,19 @@ jobs:
                 ? '- Option 2 (local git):'
                 : '',
               process.env.STATUS === 'fail'
-                ? `  - git fetch origin`
+                ? `  1. Update your local base branch: \`git pull origin ${process.env.BASE_REF}\``
                 : '',
               process.env.STATUS === 'fail'
-                ? `  - git checkout "${process.env.HEAD_REF}"`
+                ? `  2. Switch to the head branch: \`git checkout ${process.env.HEAD_REF}\``
                 : '',
               process.env.STATUS === 'fail'
-                ? `  - git rebase "origin/${process.env.BASE_REF}"`
+                ? `  3. Merge the base branch into the head branch: \`git merge ${process.env.BASE_REF}\``
                 : '',
               process.env.STATUS === 'fail'
-                ? '  - git push --force-with-lease'
+                ? '  4. If there are conflicts, resolve them and commit the result.'
+                : '',
+              process.env.STATUS === 'fail'
+                ? `  5. Push the changes: \`git push -u origin ${process.env.HEAD_REF}\``
                 : ''
             ].filter(Boolean).join('\n');
 
@@ -192,6 +226,30 @@ jobs:
                 body
               });
             }
+
+      - name: Post commit status
+        continue-on-error: true
+        uses: actions/github-script@v7
+        env:
+          HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}
+          STATUS: ${{ steps.drift.outputs.status }}
+          BEHIND: ${{ steps.drift.outputs.behind }}
+          MAX_BEHIND: ${{ inputs.max_behind }}
+          BASE_REF: ${{ steps.drift.outputs.base_ref }}
+        with:
+          script: |
+            const state = process.env.STATUS === 'fail' ? 'failure' : 'success';
+            const desc = process.env.STATUS === 'fail'
+              ? `${process.env.BEHIND} commits behind ${process.env.BASE_REF} (limit: ${process.env.MAX_BEHIND})`
+              : `Within drift threshold (${process.env.BEHIND}/${process.env.MAX_BEHIND} behind)`;
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.HEAD_SHA,
+              state,
+              context: 'commit-drift/within-threshold',
+              description: desc.slice(0, 140)
+            });
 
       - name: Fail if behind limit exceeded
         run: |
