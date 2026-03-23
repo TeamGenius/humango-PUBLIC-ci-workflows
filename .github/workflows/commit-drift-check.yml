@@ -31,6 +31,7 @@ jobs:
   drift:
     name: Commit Drift Gate
     runs-on: [self-hosted, small, gke, linux, preemptible, humango]
+    timeout-minutes: 4 # 4 min
     concurrency:
       group: commit-drift-pr-${{ github.repository }}-${{ github.event.pull_request.number || inputs.pr_number || github.ref_name }}
       cancel-in-progress: true
