@@ -31,6 +31,11 @@ inputs:
     required: false
     default: ''
 
+  hotfix-branch-alpha:
+    description: Manual override of branch used for alpha hotfix deployments
+    required: false
+    default: ''
+
 outputs:
   reference-branch:
     description: Computed Sonar reference branch
@@ -57,6 +62,7 @@ runs:
         GCP_PROJECT="${{ inputs.gcloud-project }}"
         DEFAULT_REF="${{ inputs.default-reference-branch }}"
         RELEASE_BRANCH_ALPHA="${{ inputs.release-branch-alpha }}"
+        HOTFIX_BRANCH_ALPHA="${{ inputs.hotfix-branch-alpha }}"
         PROJECT_PREFIX="${{ inputs.project-prefix }}"
 
         ########################################
@@ -84,6 +90,18 @@ runs:
         ########################################
 
         IS_RELEASE_ALPHA=false
+        IS_HOTFIX_ALPHA=false
+
+        if [[ -n "$HOTFIX_BRANCH_ALPHA" ]]; then
+          if [[ "$CURRENT_BRANCH" == *"$HOTFIX_BRANCH_ALPHA"* ]] || \
+             [[ "$PR_BASE_REF" == *"$HOTFIX_BRANCH_ALPHA"* ]]; then
+
+            IS_HOTFIX_ALPHA=true
+            REF_BRANCH="$HOTFIX_BRANCH_ALPHA"
+
+            log "alpha hotfix branch detected: $HOTFIX_BRANCH_ALPHA"
+          fi
+        fi
 
         if [[ -n "$RELEASE_BRANCH_ALPHA" ]]; then
           if [[ "$CURRENT_BRANCH" == *"$RELEASE_BRANCH_ALPHA"* ]] || \
@@ -118,6 +136,10 @@ runs:
         ########################################
 
         if [[ "$IS_RELEASE_ALPHA" == "true" ]]; then
+
+          SONAR_PROJECT_KEY="${PROJECT_PREFIX}-release"
+
+        elif [[ "$IS_HOTFIX_ALPHA" == "true" ]]; then
 
           SONAR_PROJECT_KEY="${PROJECT_PREFIX}-release"
 
