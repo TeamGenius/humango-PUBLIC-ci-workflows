@@ -21,6 +21,10 @@ on:
         description: 'PR number (used when called from a push-triggered matrix job)'
         type: number
         default: 0
+      caller_tag:
+        description: 'Optional tag appended to the concurrency group to isolate different callers (e.g. "focus", "cron") and prevent cross-workflow cancellation'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -33,7 +37,7 @@ jobs:
     runs-on: [self-hosted, small, gke, linux, preemptible, humango]
     timeout-minutes: 4 # 4 min
     concurrency:
-      group: commit-drift-pr-${{ github.repository }}-${{ github.event.pull_request.number || inputs.pr_number || github.ref_name }}
+      group: commit-drift-pr-${{ github.repository }}-${{ github.event.pull_request.number || inputs.pr_number || github.ref_name }}${{ inputs.caller_tag && format('-{0}', inputs.caller_tag) || '' }}
       cancel-in-progress: true
 
     steps:
