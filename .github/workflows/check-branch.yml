@@ -8,17 +8,17 @@ on:
         required: true
         type: string
       master_branch_name:
-        description: 'The name of the master branch'
+        description: 'Comma-separated list of allowed branches (e.g., "master,main" or "master"). Leave empty to allow all branches'
         required: false
         type: string
         default: 'master'        
       require_master_for_project:
-        description: 'Project that requires master branch for deployments'
+        description: 'Project that requires specific branches for deployments (e.g., "humango-beta"). Leave empty to skip this check'
         required: false
         type: string
         default: 'humango-beta'
       require_master_for_deploy_env:
-        description: 'Deployment environment that requires master branch for deployments'
+        description: 'Deployment environment that requires specific branches for deployments (e.g., "production"). Leave empty to skip this check'
         required: false
         type: string
         default: 'production' 
@@ -39,9 +39,29 @@ jobs:
         run: |
           echo "Branch: ${{ github.ref_name }}"
           echo "GCP Project: ${{ inputs.gcloud_project }}"
+          
+          # Check if project and environment match the restriction
           if [ "${{ inputs.gcloud_project }}" == "${{ inputs.require_master_for_project }}" ] && \
-             [ "${{ inputs.deploy_env_to_check }}" == "${{ inputs.require_master_for_deploy_env }}" ] && \
-             [ "${{ github.ref_name }}" != "${{ inputs.master_branch_name }}" ]; then
-            echo "ERROR: Deployments to ${{ inputs.require_master_for_project }} in ${{ inputs.require_master_for_deploy_env }} environment MUST be from ${{ inputs.master_branch_name }} branch"
-            exit 1
+             [ "${{ inputs.deploy_env_to_check }}" == "${{ inputs.require_master_for_deploy_env }}" ]; then
+            
+            # Parse comma-separated allowed branches and check if current branch is allowed
+            CURRENT_BRANCH="${{ github.ref_name }}"
+            ALLOWED_BRANCHES="${{ inputs.master_branch_name }}"
+            IS_ALLOWED=false
+            
+            # Convert comma-separated list to array and check each branch
+            IFS=',' read -ra BRANCHES <<< "$ALLOWED_BRANCHES"
+            for branch in "${BRANCHES[@]}"; do
+              # Trim whitespace
+              branch=$(echo "$branch" | xargs)
+              if [ "$CURRENT_BRANCH" == "$branch" ]; then
+                IS_ALLOWED=true
+                break
+              fi
+            done
+            
+            if [ "$IS_ALLOWED" = false ]; then
+              echo "ERROR: Deployments to ${{ inputs.require_master_for_project }} in ${{ inputs.require_master_for_deploy_env }} environment MUST be from one of these branches: $ALLOWED_BRANCHES"
+              exit 1
+            fi
           fi
