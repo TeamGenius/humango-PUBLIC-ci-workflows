@@ -28,6 +28,22 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    # With the community branch plugin the scanner auto-detects the analyzed branch, and it
+    # refuses a new-code reference branch equal to that branch (e.g. the scheduled development
+    # deploy). Drop the reference in that case so Sonar falls back to the project's new-code setting.
+    - name: Resolve new code reference branch
+      id: reference
+      shell: bash
+      env:
+        REFERENCE_BRANCH: ${{ inputs.sonar-reference-branch }}
+        CURRENT_BRANCH: ${{ github.head_ref || github.ref_name }}
+      run: |
+        if [[ -n "$REFERENCE_BRANCH" && "$REFERENCE_BRANCH" != "$CURRENT_BRANCH" ]]; then
+          echo "arg=-Dsonar.newCode.referenceBranch=$REFERENCE_BRANCH" >> "$GITHUB_OUTPUT"
+        else
+          echo "Info: reference branch '$REFERENCE_BRANCH' is the analyzed branch; not setting sonar.newCode.referenceBranch"
+        fi
+
     - name: SonarQube Scan
       uses: sonarsource/sonarqube-scan-action@master
       env:
@@ -43,5 +59,5 @@ runs:
           -Dproject.settings=${{ inputs.project-settings-file }}
           -Dsonar.projectKey=${{ inputs.sonar-project-key }}
           -Dsonar.projectVersion=${{ inputs.sonar-project-version }}
-          -Dsonar.newCode.referenceBranch=${{ inputs.sonar-reference-branch }}
+          ${{ steps.reference.outputs.arg }}
           ${{ inputs.extra-args }}
