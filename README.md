@@ -30,10 +30,25 @@ recorded under the wrong branch:
     wait-for-quality-gate: 'true'
 ```
 
-With one SonarQube project per repository (branches and pull requests inside it), leave
-`sonar-reference-branch` empty and define "new code" in the project settings instead, and pass
-the repository's single project key rather than using `determine-sonar-vars`. For an analysis
-rooted in a subdirectory (e.g. a Flutter app), set `project-base-dir`.
+With one SonarQube project per repository (branches and pull requests inside it), call
+`determine-sonar-vars` with `single-project: 'true'` (plus `sonar-host-url` / `sonar-token`) and
+pass its outputs to `run-sonarqube-scan`. The project key is `project-prefix`, and the new-code
+reference is chosen per analyzed branch (`resolve-new-code-reference.sh`); release-line branches are
+ordered by release number (`R<x>.M<y>` in the name), not by commit date:
+
+| Analyzed | New-code reference |
+| --- | --- |
+| Pull request | none: SonarQube compares a PR with its target branch |
+| `development`, `master`, `main`, `alpha` | none: the project's setting ("previous version") |
+| `hotfix/R<x>.M<y>...` | its release (`release/*` or `historical/*` named `R<x>.M<y>`), else the highest lower release |
+| `release/*`, `historical/*` | the highest release strictly lower than its own (never a branch of the same release, e.g. its own hotfix) |
+| release-line branch without a release number | the most recent other `release/*` or `historical/*` branch |
+| other `hotfix/*` | `master` |
+| anything else | `development` |
+
+A reference is only used when it already exists as a branch in the SonarQube project; otherwise
+the project's setting applies. For an analysis rooted in a subdirectory (e.g. a Flutter app), set
+`project-base-dir` on `run-sonarqube-scan`.
 
 ### Utility Actions
 - **cancel-on-failure** - **DEPRECATED, unused and slated for removal.** It never actually runs after a failure (callers invoke it as a plain step) and needs `actions: write`, which callers do not grant. Do not add new usages.
