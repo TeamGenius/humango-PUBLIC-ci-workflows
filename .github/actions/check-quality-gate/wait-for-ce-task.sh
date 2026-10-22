@@ -31,7 +31,8 @@ fi
 
 deadline=$((SECONDS + timeout_seconds))
 while true; do
-  task="$(curl --silent --fail --show-error --user "${SONAR_TOKEN}:" "$ce_task_url")"
+  # Token comes from the environment; not a hardcoded credential.
+  task="$(curl --silent --fail --show-error --user "${SONAR_TOKEN}:" "$ce_task_url")" # gitleaks:allow
   status="$(jq -r '.task.status // empty' <<< "$task")"
 
   case "$status" in
