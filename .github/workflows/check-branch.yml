@@ -36,19 +36,26 @@ jobs:
     runs-on: [self-hosted, small, gke, linux, preemptible, humango]
     steps:
       - name: Verify branch policy
+        # Inputs/context are passed through env (not interpolated into the script) to prevent
+        # script injection.
+        env:
+          CURRENT_BRANCH: ${{ github.ref_name }}
+          GCLOUD_PROJECT: ${{ inputs.gcloud_project }}
+          ALLOWED_BRANCHES: ${{ inputs.master_branch_name }}
+          REQUIRE_MASTER_FOR_PROJECT: ${{ inputs.require_master_for_project }}
+          REQUIRE_MASTER_FOR_DEPLOY_ENV: ${{ inputs.require_master_for_deploy_env }}
+          DEPLOY_ENV_TO_CHECK: ${{ inputs.deploy_env_to_check }}
         run: |
-          echo "Branch: ${{ github.ref_name }}"
-          echo "GCP Project: ${{ inputs.gcloud_project }}"
-          
+          echo "Branch: $CURRENT_BRANCH"
+          echo "GCP Project: $GCLOUD_PROJECT"
+
           # Check if project and environment match the restriction
-          if [ "${{ inputs.gcloud_project }}" == "${{ inputs.require_master_for_project }}" ] && \
-             [ "${{ inputs.deploy_env_to_check }}" == "${{ inputs.require_master_for_deploy_env }}" ]; then
-            
+          if [ "$GCLOUD_PROJECT" == "$REQUIRE_MASTER_FOR_PROJECT" ] && \
+             [ "$DEPLOY_ENV_TO_CHECK" == "$REQUIRE_MASTER_FOR_DEPLOY_ENV" ]; then
+
             # Parse comma-separated allowed branches and check if current branch is allowed
-            CURRENT_BRANCH="${{ github.ref_name }}"
-            ALLOWED_BRANCHES="${{ inputs.master_branch_name }}"
             IS_ALLOWED=false
-            
+
             # Convert comma-separated list to array and check each branch
             IFS=',' read -ra BRANCHES <<< "$ALLOWED_BRANCHES"
             for branch in "${BRANCHES[@]}"; do
@@ -59,9 +66,9 @@ jobs:
                 break
               fi
             done
-            
+
             if [ "$IS_ALLOWED" = false ]; then
-              echo "ERROR: Deployments to ${{ inputs.require_master_for_project }} in ${{ inputs.require_master_for_deploy_env }} environment MUST be from one of these branches: $ALLOWED_BRANCHES"
+              echo "ERROR: Deployments to $REQUIRE_MASTER_FOR_PROJECT in $REQUIRE_MASTER_FOR_DEPLOY_ENV environment MUST be from one of these branches: $ALLOWED_BRANCHES"
               exit 1
             fi
           fi

@@ -10,10 +10,10 @@ Shared GitHub Actions workflows and composite actions used across Humango projec
 ### SonarQube Actions
 - **determine-sonar-vars** - Calculate SonarQube project key and reference branch
 - **run-sonarqube-scan** - Execute SonarQube scanner
-- **check-quality-gate** - Verify SonarQube quality gate status
+- **check-quality-gate** - Verify SonarQube quality gate status. Waits for the SonarQube background task for at most `timeout-seconds` (default 600, `0` = unbounded) and fails clearly if the task is `FAILED`/`CANCELED`
 
 ### Utility Actions
-- **cancel-on-failure** - Cancel workflow on job failure
+- **cancel-on-failure** - **DEPRECATED, unused and slated for removal.** It never actually runs after a failure (callers invoke it as a plain step) and needs `actions: write`, which callers do not grant. Do not add new usages.
 - **upload-coverage** - Upload coverage reports as artifacts
 
 ### Available Workflows

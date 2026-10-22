@@ -45,7 +45,7 @@ runs:
         fi
 
     - name: SonarQube Scan
-      uses: sonarsource/sonarqube-scan-action@master
+      uses: sonarsource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
       env:
         SONAR_TOKEN: ${{ inputs.sonar-token }}
         SONAR_HOST_URL: ${{ inputs.sonar-host-url }}
@@ -54,7 +54,7 @@ runs:
         #change the version in the extra_args to control the version of the project and the new code period
         # new code and branch name set to the PR destination branch and current branch respectively
         # Branch analysis (i.e., analyzing multiple branches independently) is a feature of SonarQube Developer Edition and above.
-        # use projectKey as fall back instead of branch name key below        
+        # use projectKey as fall back instead of branch name key below
         args: >
           -Dproject.settings=${{ inputs.project-settings-file }}
           -Dsonar.projectKey=${{ inputs.sonar-project-key }}
