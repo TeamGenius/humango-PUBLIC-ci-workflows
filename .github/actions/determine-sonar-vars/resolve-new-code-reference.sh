@@ -5,9 +5,13 @@
 #
 #   pull request                       -> nothing (SonarQube compares a PR with its target)
 #   development, master, main, alpha   -> nothing (a branch cannot reference itself)
-#   release line (release/*, historical/*, hotfix/R<x>.M<y>...)
-#                                      -> for hotfix/R<x>.M<y>.<n>: the release branch of R<x>.M<y>;
-#                                         otherwise / if absent: the most recent other release-line branch
+#   release line (release/*, historical/*, hotfix/R<x>.M<y>...), ordered by release number R<x>.M<y>:
+#     hotfix/R<x>.M<y>...              -> its release (release/* or historical/* named R<x>.M<y>), else
+#                                         the highest lower release
+#     release/*, historical/*          -> the highest release strictly lower than its own; never a
+#                                         branch of the same release (e.g. its own hotfix, if one was
+#                                         left alive by mistake)
+#     ... without a release number     -> the most recent other release/* or historical/* branch
 #   other hotfix/*                     -> master (or main)
 #   anything else (feature branches)   -> development
 #
@@ -61,17 +65,57 @@ recent_branches() {
     | sed 's#^origin/##' | grep -vxF "$branch" || true
 }
 
+# "major minor" of a release name (R3.M9 in release/sprint-53-R3.M9, hotfix/R3.M9.001, ...)
+release_number() {
+  if [[ "$1" =~ [Rr]([0-9]+)\.[Mm]([0-9]+) ]]; then
+    echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+  fi
+}
+
+# Release-line branches as "major minor kind patch name", where kind ranks release (3) over
+# historical (2) over hotfix (1) for the same release; input order (most recent commit first)
+# breaks remaining ties
+versioned_release_line() {
+  local candidate number kind patch
+  while IFS= read -r candidate; do
+    number="$(release_number "$candidate")"
+    [[ -z "$number" ]] && continue
+    case "$candidate" in
+      release/*) kind=3 ;;
+      historical/*) kind=2 ;;
+      hotfix/*) kind=1 ;;
+      *) continue ;;
+    esac
+    patch=0
+    [[ "$candidate" =~ [Mm][0-9]+\.([0-9]+) ]] && patch="$((10#${BASH_REMATCH[1]}))"
+    echo "$number $kind $patch $candidate"
+  done < <(recent_branches release/ historical/ hotfix/)
+}
+
 candidates=()
-if [[ "$branch" =~ ^(release/|historical/|hotfix/R[0-9]+\.M[0-9]+) ]]; then
-  if [[ "$branch" =~ ^hotfix/(R[0-9]+\.M[0-9]+) ]]; then
-    release="${BASH_REMATCH[1]}"
+if [[ "$branch" =~ ^(release/|historical/|hotfix/[Rr][0-9]+\.[Mm][0-9]+) ]]; then
+  own="$(release_number "$branch")"
+  if [[ -n "$own" ]]; then
+    read -r own_major own_minor <<< "$own"
+    sorted="$(versioned_release_line | sort -s -k1,1nr -k2,2nr -k3,3nr -k4,4nr)"
+    if [[ "$branch" == hotfix/* ]]; then
+      # its own release first
+      while read -r major minor kind patch candidate; do
+        [[ -n "$candidate" && "$major $minor" == "$own_major $own_minor" && $kind -ge 2 ]] && candidates+=("$candidate")
+      done <<< "$sorted"
+    fi
+    # then the releases strictly lower than its own, highest first
+    while read -r major minor kind patch candidate; do
+      [[ -z "$candidate" ]] && continue
+      if (( major < own_major || (major == own_major && minor < own_minor) )); then
+        candidates+=("$candidate")
+      fi
+    done <<< "$sorted"
+  else
     while IFS= read -r candidate; do
-      [[ "$candidate" =~ ^(release|historical)/.*${release//./\\.}([^0-9]|$) ]] && candidates+=("$candidate")
+      candidates+=("$candidate")
     done < <(recent_branches release/ historical/)
   fi
-  while IFS= read -r candidate; do
-    [[ "$candidate" =~ ^(release/|historical/|hotfix/R[0-9]+\.M[0-9]+) ]] && candidates+=("$candidate")
-  done < <(recent_branches release/ historical/ hotfix/)
 elif [[ "$branch" == hotfix/* ]]; then
   candidates=(master main)
 else

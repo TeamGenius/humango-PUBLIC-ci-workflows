@@ -33,14 +33,16 @@ recorded under the wrong branch:
 With one SonarQube project per repository (branches and pull requests inside it), call
 `determine-sonar-vars` with `single-project: 'true'` (plus `sonar-host-url` / `sonar-token`) and
 pass its outputs to `run-sonarqube-scan`. The project key is `project-prefix`, and the new-code
-reference is chosen per analyzed branch (`resolve-new-code-reference.sh`):
+reference is chosen per analyzed branch (`resolve-new-code-reference.sh`); release-line branches are
+ordered by release number (`R<x>.M<y>` in the name), not by commit date:
 
 | Analyzed | New-code reference |
 | --- | --- |
 | Pull request | none: SonarQube compares a PR with its target branch |
 | `development`, `master`, `main`, `alpha` | none: the project's setting ("previous version") |
-| `hotfix/R<x>.M<y>...` | the release branch of `R<x>.M<y>` (`release/*` or `historical/*`), else the most recent other release-line branch |
-| `release/*`, `historical/*` | the most recent other release-line branch (the previous release) |
+| `hotfix/R<x>.M<y>...` | its release (`release/*` or `historical/*` named `R<x>.M<y>`), else the highest lower release |
+| `release/*`, `historical/*` | the highest release strictly lower than its own (never a branch of the same release, e.g. its own hotfix) |
+| release-line branch without a release number | the most recent other `release/*` or `historical/*` branch |
 | other `hotfix/*` | `master` |
 | anything else | `development` |
 
