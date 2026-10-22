@@ -36,9 +36,14 @@ sonar_branches() {
     cat "$SONAR_BRANCH_LIST_FILE"
     return
   fi
-  curl --silent --fail --show-error --max-time 20 --user "${SONAR_TOKEN:?}:" \
-    "${SONAR_HOST_URL:?}/api/project_branches/list?project=${PROJECT_KEY:?}" \
-    | jq -r '.branches[] | select(.type == "BRANCH") | .name'
+  local response
+  response="$(curl --silent --fail --show-error --max-time 20 --user "${SONAR_TOKEN:?}:" \
+    "${SONAR_HOST_URL:?}/api/project_branches/list?project=${PROJECT_KEY:?}")"
+  if command -v jq >/dev/null 2>&1; then
+    jq -r '.branches[] | select(.type == "BRANCH") | .name' <<< "$response"
+  else
+    python3 -c 'import json,sys; [print(b["name"]) for b in json.load(sys.stdin)["branches"] if b.get("type") == "BRANCH"]' <<< "$response"
+  fi
 }
 
 # Remote branches under the given prefixes, most recent commit first, excluding the analyzed one
