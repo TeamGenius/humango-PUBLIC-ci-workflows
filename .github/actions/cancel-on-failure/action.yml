@@ -1,11 +1,17 @@
-name: 'Cancel Workflow on Failure'
-description: 'Cancels the current workflow run if the job fails'
+# DEPRECATED - unused, slated for removal.
+# This action is effectively dead: its condition never fires because callers invoke it as a plain
+# step (so it is skipped once a previous step fails), and callers do not grant `actions: write`,
+# which cancelWorkflowRun requires. Callers in humango and humango-mobile are being removed.
+# It is kept only so that any remaining caller pinned to @master does not break. Do not add new
+# usages.
+name: 'Cancel Workflow on Failure (DEPRECATED)'
+description: 'DEPRECATED - unused and slated for removal; do not use. Intended to cancel the current workflow run if the job fails.'
 runs:
   using: 'composite'
   steps:
     - name: Cancel workflow on failure
       if: ${{ always() && failure() }} # false  # TEMPORARILY DISABLED
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9
       with:
         script: |
           const run_id = context.runId;

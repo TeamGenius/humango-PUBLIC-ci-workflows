@@ -42,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -52,8 +52,10 @@ jobs:
           INPUT_BASE_REF: ${{ inputs.base_ref }}
           EVENT_BASE_REF: ${{ github.base_ref }}
           DEFAULT_BASE_REF: ${{ github.event.repository.default_branch }}
+          INPUT_HEAD_SHA: ${{ inputs.head_sha }}
+          MAX_BEHIND: ${{ inputs.max_behind }}
         run: |
-          TARGET_REF="${{ inputs.head_sha }}"
+          TARGET_REF="$INPUT_HEAD_SHA"
           if [ -z "$TARGET_REF" ]; then
             TARGET_REF="HEAD"
           fi
@@ -83,7 +85,6 @@ jobs:
           BEHIND=$(git rev-list --count "$TARGET_REF".."$BASE_TARGET")
           AHEAD=$(git rev-list --count "$BASE_TARGET".."$TARGET_REF")
 
-          MAX_BEHIND="${{ inputs.max_behind }}"
           if [ "$MAX_BEHIND" -eq 0 ]; then
             STATUS="pass"
             MESSAGE="Behind check disabled"
@@ -112,14 +113,14 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          BEHIND: ${{ steps.drift.outputs.behind }}
+          AHEAD: ${{ steps.drift.outputs.ahead }}
+          TARGET_REF: ${{ steps.drift.outputs.target_ref }}
+          BASE_REF: ${{ steps.drift.outputs.base_ref }}
+          MAX_BEHIND: ${{ inputs.max_behind }}
+          STATUS: ${{ steps.drift.outputs.status }}
+          HEAD_BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          BEHIND="${{ steps.drift.outputs.behind }}"
-          AHEAD="${{ steps.drift.outputs.ahead }}"
-          TARGET_REF="${{ steps.drift.outputs.target_ref }}"
-          BASE_REF="${{ steps.drift.outputs.base_ref }}"
-          MAX_BEHIND="${{ inputs.max_behind }}"
-          STATUS="${{ steps.drift.outputs.status }}"
-
           {
             echo "### Commit Drift Check"
             echo
@@ -144,12 +145,12 @@ jobs:
               echo "  1. Update your local base branch:"
               echo "     \`git pull origin $BASE_REF\`"
               echo "  2. Switch to the head branch:"
-              echo "     \`git checkout ${{ github.head_ref || github.ref_name }}\`"
+              echo "     \`git checkout $HEAD_BRANCH\`"
               echo "  3. Merge the base branch into the head branch:"
               echo "     \`git merge $BASE_REF\`"
               echo "  4. If there are conflicts, resolve them and commit the result."
               echo "  5. Push the changes:"
-              echo "     \`git push -u origin ${{ github.head_ref || github.ref_name }}\`"
+              echo "     \`git push -u origin $HEAD_BRANCH\`"
             else
               echo "ℹ️ Drift check skipped because no base branch could be determined."
             fi
@@ -158,7 +159,7 @@ jobs:
       - name: Upsert PR feedback comment
         if: ${{ (github.event.pull_request.number != null || inputs.pr_number != 0) && steps.drift.outputs.status != 'skipped' }}
         continue-on-error: true
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           BEHIND: ${{ steps.drift.outputs.behind }}
           MAX_BEHIND: ${{ inputs.max_behind }}
@@ -234,7 +235,7 @@ jobs:
 
       - name: Post commit status
         continue-on-error: true
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           HEAD_SHA: ${{ inputs.head_sha || github.event.pull_request.head.sha || github.sha }}
           STATUS: ${{ steps.drift.outputs.status }}
@@ -257,8 +258,10 @@ jobs:
             });
 
       - name: Fail if behind limit exceeded
+        env:
+          STATUS: ${{ steps.drift.outputs.status }}
         run: |
-          if [ "${{ steps.drift.outputs.status }}" = "fail" ]; then
+          if [ "$STATUS" = "fail" ]; then
             echo "❌ Branch is too far behind base. See summary and PR comment for next steps."
             exit 1
           fi

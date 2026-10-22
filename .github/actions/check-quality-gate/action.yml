@@ -12,23 +12,49 @@ inputs:
     description: 'Path to the check_quality_gate.sh script'
     required: false
     default: './dev_pipeline/check_quality_gate.sh'
+  timeout-seconds:
+    description: >
+      Maximum time to wait for the SonarQube background (CE) task to finish before failing.
+      Set to 0 to wait indefinitely (previous behaviour).
+    required: false
+    default: '600'
+  poll-interval-seconds:
+    description: 'Delay between two polls of the SonarQube background (CE) task'
+    required: false
+    default: '5'
 
 runs:
   using: 'composite'
   steps:
+    # The action first waits (bounded) for the CE task referenced by report-task.txt and fails
+    # clearly on FAILED/CANCELED/timeout. The caller's check script then runs as before and finds
+    # the task already finished. Inputs are passed through env (never interpolated into the
+    # script) to prevent script injection.
     - name: Check Quality Gate
       shell: bash
       env:
         SONAR_TOKEN: ${{ inputs.sonar-token }}
+        REPORT_FILE: ${{ inputs.report-task-file }}
+        CHECK_SCRIPT: ${{ inputs.check-script-path }}
+        TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+        POLL_INTERVAL_SECONDS: ${{ inputs.poll-interval-seconds }}
       run: |
+        set -euo pipefail
         echo "STEP - Check sonar quality gate (containerized)"
+        CE_WAIT_SCRIPT="$(cat "$GITHUB_ACTION_PATH/wait-for-ce-task.sh")"
+        export CE_WAIT_SCRIPT
         docker run --rm \
-          -e SONAR_TOKEN="${SONAR_TOKEN}" \
-          -e REPORT_FILE="${{ inputs.report-task-file }}" \
-          -v $(pwd):/workspace \
+          -e SONAR_TOKEN \
+          -e REPORT_FILE \
+          -e CHECK_SCRIPT \
+          -e TIMEOUT_SECONDS \
+          -e POLL_INTERVAL_SECONDS \
+          -e CE_WAIT_SCRIPT \
+          -v "$(pwd)":/workspace \
           -w /workspace \
           debian:bookworm-slim \
-          bash -lc "set -e; \
-            apt-get update && apt-get install -y curl apt-transport-https ca-certificates gnupg jq; \
-            chmod +x ${{ inputs.check-script-path }}; \
-            ${{ inputs.check-script-path }}"
+          bash -lc 'set -e
+            apt-get update && apt-get install -y curl apt-transport-https ca-certificates gnupg jq
+            bash -c "$CE_WAIT_SCRIPT"
+            chmod +x "$CHECK_SCRIPT"
+            "$CHECK_SCRIPT"'

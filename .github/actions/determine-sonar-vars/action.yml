@@ -50,20 +50,17 @@ runs:
   steps:
     - id: compute
       shell: bash
+      # Inputs are passed through env (not interpolated into the script) to prevent script injection.
+      env:
+        CURRENT_BRANCH: ${{ inputs.current-branch }}
+        PR_BASE_REF: ${{ inputs.pr-base-ref }}
+        GCP_PROJECT: ${{ inputs.gcloud-project }}
+        DEFAULT_REF: ${{ inputs.default-reference-branch }}
+        RELEASE_BRANCH_ALPHA: ${{ inputs.release-branch-alpha }}
+        HOTFIX_BRANCH_ALPHA: ${{ inputs.hotfix-branch-alpha }}
+        PROJECT_PREFIX: ${{ inputs.project-prefix }}
       run: |
         set -euo pipefail
-
-        ########################################
-        # Configuration
-        ########################################
-
-        CURRENT_BRANCH="${{ inputs.current-branch }}"
-        PR_BASE_REF="${{ inputs.pr-base-ref }}"
-        GCP_PROJECT="${{ inputs.gcloud-project }}"
-        DEFAULT_REF="${{ inputs.default-reference-branch }}"
-        RELEASE_BRANCH_ALPHA="${{ inputs.release-branch-alpha }}"
-        HOTFIX_BRANCH_ALPHA="${{ inputs.hotfix-branch-alpha }}"
-        PROJECT_PREFIX="${{ inputs.project-prefix }}"
 
         ########################################
         # Helpers
