@@ -36,19 +36,52 @@ inputs:
     required: false
     default: ''
 
+  single-project:
+    description: >-
+      'true': one SonarQube project per repository (community branch plugin). project-key is
+      project-prefix, and reference-branch is chosen per analyzed branch by
+      resolve-new-code-reference.sh (empty for pull requests, development, master). The other
+      inputs above are then ignored except current-branch.
+    required: false
+    default: 'false'
+
+  sonar-host-url:
+    description: SonarQube URL (single-project mode, to check that the reference branch exists)
+    required: false
+    default: ''
+
+  sonar-token:
+    description: SonarQube token (single-project mode, to check that the reference branch exists)
+    required: false
+    default: ''
+
 outputs:
   reference-branch:
-    description: Computed Sonar reference branch
-    value: ${{ steps.compute.outputs.reference-branch }}
+    description: Computed Sonar reference branch (empty = use the project's new-code setting)
+    value: ${{ inputs.single-project == 'true' && steps.single.outputs.reference-branch || steps.compute.outputs.reference-branch }}
 
   project-key:
     description: Computed Sonar project key
-    value: ${{ steps.compute.outputs.project-key }}
+    value: ${{ inputs.single-project == 'true' && inputs.project-prefix || steps.compute.outputs.project-key }}
 
 runs:
   using: composite
   steps:
+    - id: single
+      if: inputs.single-project == 'true'
+      shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        BRANCH: ${{ inputs.current-branch || github.ref_name }}
+        PROJECT_KEY: ${{ inputs.project-prefix }}
+        SONAR_HOST_URL: ${{ inputs.sonar-host-url }}
+        SONAR_TOKEN: ${{ inputs.sonar-token }}
+      run: |
+        reference="$("$GITHUB_ACTION_PATH/resolve-new-code-reference.sh")"
+        echo "reference-branch=$reference" >> "$GITHUB_OUTPUT"
+
     - id: compute
+      if: inputs.single-project != 'true'
       shell: bash
       # Inputs are passed through env (not interpolated into the script) to prevent script injection.
       env:
