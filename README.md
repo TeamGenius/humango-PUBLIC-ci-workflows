@@ -10,7 +10,25 @@ Shared GitHub Actions workflows and composite actions used across Humango projec
 ### SonarQube Actions
 - **determine-sonar-vars** - Calculate SonarQube project key and reference branch
 - **run-sonarqube-scan** - Execute SonarQube scanner
-- **check-quality-gate** - Verify SonarQube quality gate status. Waits for the SonarQube background task for at most `timeout-seconds` (default 600, `0` = unbounded) and fails clearly if the task is `FAILED`/`CANCELED`
+- **check-quality-gate** - Verify SonarQube quality gate status. Waits for the SonarQube background task for at most `timeout-seconds` (default 600, `0` = unbounded) and fails clearly if the task is `FAILED`/`CANCELED` (prefer `wait-for-quality-gate: 'true'` on run-sonarqube-scan)
+
+#### SonarQube branch and pull request analysis
+
+The SonarQube server runs the community branch plugin, which detects the analysis type from the
+GitHub Actions environment: a `pull_request` run is analyzed as a pull request (and decorated on
+GitHub), anything else as a branch named after `GITHUB_REF_NAME`.
+
+When the code that is checked out can differ from the workflow ref (for example a
+`workflow_dispatch` with a `branch` input), pass it to `run-sonarqube-scan` so the analysis is not
+recorded under the wrong branch:
+
+```yaml
+- uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/actions/run-sonarqube-scan@master
+  with:
+    # ...
+    branch-name: ${{ inputs.branch || github.ref_name }}
+    wait-for-quality-gate: 'true'
+```
 
 ### Utility Actions
 - **cancel-on-failure** - **DEPRECATED, unused and slated for removal.** It never actually runs after a failure (callers invoke it as a plain step) and needs `actions: write`, which callers do not grant. Do not add new usages.
