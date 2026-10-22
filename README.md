@@ -30,6 +30,11 @@ recorded under the wrong branch:
     wait-for-quality-gate: 'true'
 ```
 
+With one SonarQube project per repository (branches and pull requests inside it), leave
+`sonar-reference-branch` empty and define "new code" in the project settings instead, and pass
+the repository's single project key rather than using `determine-sonar-vars`. For an analysis
+rooted in a subdirectory (e.g. a Flutter app), set `project-base-dir`.
+
 ### Utility Actions
 - **cancel-on-failure** - **DEPRECATED, unused and slated for removal.** It never actually runs after a failure (callers invoke it as a plain step) and needs `actions: write`, which callers do not grant. Do not add new usages.
 - **upload-coverage** - Upload coverage reports as artifacts

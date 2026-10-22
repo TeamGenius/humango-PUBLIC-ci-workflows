@@ -8,8 +8,11 @@ inputs:
     description: 'SonarQube project version'
     required: true
   sonar-reference-branch:
-    description: 'SonarQube new code reference branch'
-    required: true
+    description: >-
+      SonarQube new code reference branch. Leave empty to use the project's new-code setting
+      (recommended with one SonarQube project per repository).
+    required: false
+    default: ''
   sonar-token:
     description: 'SonarQube authentication token'
     required: true
@@ -42,6 +45,10 @@ inputs:
     description: 'Seconds to wait for the quality gate when wait-for-quality-gate is true'
     required: false
     default: '300'
+  project-base-dir:
+    description: 'Analysis base directory (sonar.projectBaseDir), relative to the workspace'
+    required: false
+    default: '.'
 
 runs:
   using: 'composite'
@@ -87,6 +94,7 @@ runs:
         SONAR_HOST_URL: ${{ inputs.sonar-host-url }}
         SONAR_SCANNER_OPTS: -Xmx1536m
       with:
+        projectBaseDir: ${{ inputs.project-base-dir }}
         # Branch vs pull request analysis is detected by the community branch plugin (or forced
         # with branch-name); the project key still selects which SonarQube project receives it.
         args: >
