@@ -64,14 +64,37 @@ the project's setting applies. For an analysis rooted in a subdirectory (e.g. a 
 ### Using Shared Actions
 ```yaml
 - name: Determine SonarQube settings
-  uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/actions/determine-sonar-vars@main
+  id: sonar-vars
+  uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/actions/determine-sonar-vars@master
   with:
-    project-prefix: 'my-project'
-    default-reference-branch: 'development'
+    single-project: 'true'
+    project-prefix: 'humango-backend'
+    current-branch: ${{ github.ref_name }}
+    sonar-host-url: ${{ vars.SONAR_HOST_URL }}
+    sonar-token: ${{ secrets.SONAR_TOKEN }}
+
+- name: Run SonarQube scan
+  uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/actions/run-sonarqube-scan@master
+  with:
+    sonar-project-key: ${{ steps.sonar-vars.outputs.project-key }}
+    sonar-project-version: ${{ vars.SONAR_PROJECT_VERSION }}
+    sonar-reference-branch: ${{ steps.sonar-vars.outputs.reference-branch }}
+    sonar-token: ${{ secrets.SONAR_TOKEN }}
+    sonar-host-url: ${{ vars.SONAR_HOST_URL }}
+    project-settings-file: 'sonar-project.properties'
+    # PRs are gated by the required "SonarQube Code Analysis" check; branch analyses wait here
+    wait-for-quality-gate: ${{ github.event_name != 'pull_request' }}
 ```
 
-Optional repo variable for the calling repository:
-- `RELEASE_BRANCH_FOR_ALPHA_DEPLOY`: branch name or pattern used to treat matches as release/alpha for SonarQube (set in repo Variables). Leave blank to disable.
+`sonar-project-version` drives the "previous version" new-code period of `development`, `master`
+and `alpha`: bump it at each release (humango and humango-bff use the `SONAR_PROJECT_VERSION`
+repository variable, humango-mobile the `pubspec.yaml` version).
+
+**Legacy mode** (`single-project` unset): one SonarQube project per branch type
+(`<prefix>`, `<prefix>-release`, `<prefix>-master`), selected from `gcloud-project`, `pr-base-ref`,
+`default-reference-branch`, `release-branch-alpha` / `hotfix-branch-alpha` and the
+`RELEASE_BRANCH_FOR_ALPHA_DEPLOY` repository variable. No workflow uses it since 2026-10-22; it
+will be removed together with those projects (about 2026-11-22). Do not use it in new workflows.
 
 ### Using Shared Workflows
 ```yaml
