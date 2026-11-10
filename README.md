@@ -8,7 +8,7 @@ Shared GitHub Actions workflows and composite actions used across Humango projec
 ## Available Actions
 
 ### SonarQube Actions
-- **determine-sonar-vars** - Calculate SonarQube project key and reference branch
+- **determine-sonar-vars** - SonarQube project key and new-code reference branch (one project per repository)
 - **run-sonarqube-scan** - Execute SonarQube scanner
 - **check-quality-gate** - Verify SonarQube quality gate status. Waits for the SonarQube background task for at most `timeout-seconds` (default 600, `0` = unbounded) and fails clearly if the task is `FAILED`/`CANCELED` (prefer `wait-for-quality-gate: 'true'` on run-sonarqube-scan)
 
@@ -30,9 +30,9 @@ recorded under the wrong branch:
     wait-for-quality-gate: 'true'
 ```
 
-With one SonarQube project per repository (branches and pull requests inside it), call
-`determine-sonar-vars` with `single-project: 'true'` (plus `sonar-host-url` / `sonar-token`) and
-pass its outputs to `run-sonarqube-scan`. The project key is `project-prefix`, and the new-code
+Each repository has one SonarQube project (branches and pull requests inside it). Call
+`determine-sonar-vars` (with `sonar-host-url` / `sonar-token`) and pass its outputs to
+`run-sonarqube-scan`. The project key is `project-prefix`, and the new-code
 reference is chosen per analyzed branch (`resolve-new-code-reference.sh`); release-line branches are
 ordered by release number (`R<x>.M<y>` in the name), not by commit date:
 
@@ -67,7 +67,6 @@ the project's setting applies. For an analysis rooted in a subdirectory (e.g. a 
   id: sonar-vars
   uses: TeamGenius/humango-PUBLIC-ci-workflows/.github/actions/determine-sonar-vars@master
   with:
-    single-project: 'true'
     project-prefix: 'humango-backend'
     current-branch: ${{ github.ref_name }}
     sonar-host-url: ${{ vars.SONAR_HOST_URL }}
@@ -90,11 +89,11 @@ the project's setting applies. For an analysis rooted in a subdirectory (e.g. a 
 and `alpha`: bump it at each release (humango and humango-bff use the `SONAR_PROJECT_VERSION`
 repository variable, humango-mobile the `pubspec.yaml` version).
 
-**Legacy mode** (`single-project` unset): one SonarQube project per branch type
-(`<prefix>`, `<prefix>-release`, `<prefix>-master`), selected from `gcloud-project`, `pr-base-ref`,
-`default-reference-branch`, `release-branch-alpha` / `hotfix-branch-alpha` and the
-`RELEASE_BRANCH_FOR_ALPHA_DEPLOY` repository variable. No workflow uses it since 2026-10-22; it
-will be removed together with those projects (about 2026-11-22). Do not use it in new workflows.
+The former per-branch-type mode (`<prefix>-release` / `<prefix>-master` projects, inputs
+`gcloud-project`, `pr-base-ref`, `default-reference-branch`, `release-branch-alpha`,
+`hotfix-branch-alpha`) was removed on 2026-11-10 together with those projects. `single-project` is
+still accepted but ignored; a workflow still passing the removed inputs only gets an "unexpected
+input" warning.
 
 ### Using Shared Workflows
 ```yaml
