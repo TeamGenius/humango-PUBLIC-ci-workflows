@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Picks the SonarQube new-code reference branch for one project per repository (single-project
-# mode of determine-sonar-vars). Prints the branch name, or nothing to use the project's
+# Picks the SonarQube new-code reference branch for one project per repository (used by
+# determine-sonar-vars). Prints the branch name, or nothing to use the project's
 # "previous version" setting.
 #
 #   pull request                       -> nothing (SonarQube compares a PR with its target)
